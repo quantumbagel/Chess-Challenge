@@ -6,10 +6,47 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         Move[] moves = board.GetLegalMoves();
-        return moves[0];
+        Move bestMove = Move.NullMove;
+        int bestMoveEval = int.MinValue;
+        foreach (Move move in moves)
+        {
+            board.MakeMove(move);
+            int eval = Evaluate(board);
+            if (eval > bestMoveEval)
+            {
+                bestMove = move;
+                bestMoveEval = eval;
+            }
+            board.UndoMove(move);
+        }
+
+        return bestMove;
     }
 
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
+
+    int[] king_mg_table = new int[]
+    {
+        20, 30, 10,  0,  0, 10, 30, 20,
+        20, 20,  0,  0,  0,  0, 20, 20,
+        -10,-20,-20,-20,-20,-20,-20,-10,
+        -20,-30,-30,-40,-40,-30,-30,-20,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+    };
+    int[] king_eg_table = new int[]
+    {
+        -50,-30,-30,-30,-30,-30,-30,-50,
+        -30,-30,  0,  0,  0,  0,-30,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-20,-10,  0,  0,-10,-20,-30,
+        -50,-40,-30,-20,-20,-30,-40,-50,
+    };
 
     public int Evaluate(Board board)
     {
@@ -31,43 +68,38 @@ public class MyBot : IChessBot
         }
         progression /= 32;
 
-        // Mobility and Offense
+        // Mobility
         int mobility = 0;
-        int offense = 0;
-        foreach (Move move in board.GetLegalMoves())
+        bool skipped = board.TrySkipTurn();
+        if (skipped)
         {
-            PieceType movingType = move.MovePieceType;
-            PieceType capturedType = move.CapturePieceType;
-            switch (movingType)
+            foreach (Move move in board.GetLegalMoves())
             {
-                case PieceType.Pawn:
-                    mobility += 100;
-                    break;
-                case PieceType.Knight:
-                    mobility += 350;
-                    break;
-                case PieceType.Rook:
-                    mobility += 100 + (int)(300 * progression);
-                    break;
-                case PieceType.Bishop:
-                    mobility += 250;
-                    break;
-                case PieceType.Queen:
-                    mobility += 500;
-                    break;
+                switch (move.MovePieceType)
+                {
+                    case PieceType.Knight:
+                        mobility += 175;
+                        break;
+                    case PieceType.Rook:
+                        mobility += 50 + (int)(150 * progression);
+                        break;
+                    case PieceType.Bishop:
+                        mobility += 125;
+                        break;
+                    case PieceType.Queen:
+                        mobility += 250;
+                        break;
+                }
             }
-            if (capturedType != PieceType.None)
-            {
-                offense += POINT_VALUES[(int)capturedType - 1] * 2 - POINT_VALUES[(int)movingType - 1];
-            }
+
+            board.UndoSkipTurn();
         }
-        
+
         // King Safety
-        if (board.IsWhiteToMove)
-        {
+        Square kingSquare = board.GetKingSquare(board.IsWhiteToMove);
+        int kingRelativeIndex = (board.IsWhiteToMove) ? kingSquare.Index : 64 - kingSquare.Index;
+        int kingPositioning = king_mg_table[kingRelativeIndex] + (int)(progression * (king_eg_table[kingRelativeIndex] - king_mg_table[kingRelativeIndex]));
 
-        }
-
-        return material + mobility + offense;
+        return material + mobility + kingPositioning;
     }
 }
