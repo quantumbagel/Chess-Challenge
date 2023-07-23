@@ -48,6 +48,7 @@ public class MyBot : IChessBot
         -50,-40,-30,-20,-20,-30,-40,-50,
     };
 
+
     public int Evaluate(Board board)
     {
         
@@ -70,6 +71,7 @@ public class MyBot : IChessBot
 
         // Mobility
         int mobility = 0;
+        int offense = 0;
         bool skipped = board.TrySkipTurn();
         if (skipped)
         {
@@ -90,16 +92,22 @@ public class MyBot : IChessBot
                         mobility += 250;
                         break;
                 }
+
+                if (move.IsCapture)
+                {
+                    offense += (int) MathF.Max(0, POINT_VALUES[(int)move.CapturePieceType - 1] - POINT_VALUES[(int)move.MovePieceType - 1]);
+                }
             }
 
             board.UndoSkipTurn();
         }
+
 
         // King Safety
         Square kingSquare = board.GetKingSquare(board.IsWhiteToMove);
         int kingRelativeIndex = (board.IsWhiteToMove) ? kingSquare.Index : 64 - kingSquare.Index;
         int kingPositioning = king_mg_table[kingRelativeIndex] + (int)(progression * (king_eg_table[kingRelativeIndex] - king_mg_table[kingRelativeIndex]));
 
-        return material + mobility + kingPositioning;
+        return material + mobility + offense + kingPositioning;
     }
 }
