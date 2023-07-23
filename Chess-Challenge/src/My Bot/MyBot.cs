@@ -56,8 +56,10 @@ public class MyBot : IChessBot
                     mobility += 500;
                     break;
             }
-
-            offense += POINT_VALUES[(int)capturedType] * 2 - POINT_VALUES[(int)movingType];
+            if (capturedType != PieceType.None)
+            {
+                offense += POINT_VALUES[(int)capturedType - 1] * 2 - POINT_VALUES[(int)movingType - 1];
+            }
         }
         
         // King Safety
