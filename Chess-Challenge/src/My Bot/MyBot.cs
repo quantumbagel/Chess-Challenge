@@ -9,90 +9,101 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        areWeWhite = board.IsWhiteToMove; // Update areWeWhite
-        return Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
+        StartSearch(board, timer);
+        return bestMove;
     }
 
-    private float GetProgression(Board board)
-    {
-        return 1 - (BitboardHelper.GetNumberOfSetBits(board.AllPiecesBitboard) / 32f);
-    }
+    private int maxSearchDepth = 6;
+    private int maxMillisecondsPerSearch = 5000;
+    private bool isSearchCancelled = false;
 
-    private float Lerp(float a, float b, float t)
-    {
-        return a + (b - a) * t;
-    }
+    private Move bestMoveThisIteration;
+    private int bestEvalThisIteration;
 
+    private Move bestMove = Move.NullMove;
+    private int bestEval = int.MinValue;
 
-    private bool areWeWhite;
-    private int searchDepth = 6;
-    private int millisecondsPerSearch = 2000;
-    (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
+    void StartSearch(Board board, Timer timer)
     {
-        if (depth == 0)
+        for (int searchDepth = 1; searchDepth <= maxSearchDepth; searchDepth++)
         {
-            return (Evaluate(board), new Move()); // Base case, use Evaluate
+            bestMoveThisIteration = Move.NullMove;
+            bestEvalThisIteration = int.MinValue;
+            Search(board, timer, searchDepth, 0, int.MinValue, int.MaxValue);
+
+            bestMove = bestMoveThisIteration;
+            bestEval = bestEvalThisIteration;
+            if (isSearchCancelled) break;
         }
-        if (board.IsInCheckmate())
+    }
+
+
+    int Search(Board board, Timer timer, int plyRemaining, int plyFromRoot, int alpha, int beta)
+    {
+        if (timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch)
         {
-            // If we are white and white's turn, or black and black's turn, we lose, otherwise we win
-            if ((areWeWhite && board.IsWhiteToMove) || (!areWeWhite && !board.IsWhiteToMove))
-            {
-                return (int.MinValue, new Move());
-            }
-            else
-            {
-                return (int.MaxValue, new Move());
-            }
+            return 0;
         }
-        Move[] moves = Order(board.GetLegalMoves()); // the ordered, legal moves
-        int bestEval = maximizingPlayer ? int.MinValue : int.MaxValue;
-        Move bestMove = new Move();
+
+        if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
+
+        // Order the moves so we get more out of the beta pruning
+        Move[] moves = Order(board.GetLegalMoves(), board);
+
+        if (board.IsInCheckmate()) return -(int.MaxValue - plyFromRoot); // Checkmate
+        else if (moves.Length == 0) return 0; // Stalemate
+
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            var ret = Search(board, timer, depth - 1, alpha, beta, !maximizingPlayer); // recursion :)
+            int eval = -Search(board, timer, plyRemaining - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
-            if (maximizingPlayer) // Our turn
+
+            if (eval >= beta) return beta;
+            if (eval > alpha)
             {
-
-                if (ret.Item1 > bestEval)
-                {
-                    bestEval = ret.Item1;
-                    bestMove = move;
-                }
-
-                alpha = Math.Max(alpha, ret.Item1);
-
+                alpha = eval;
+                bestMoveThisIteration = plyFromRoot == 0 ? move : bestMoveThisIteration;
+                bestEvalThisIteration = plyFromRoot == 0 ? eval : bestEvalThisIteration;
             }
-            else // not our turn
-            {
-                if (ret.Item1 < bestEval)
-                {
-                    bestEval = ret.Item1;
-                    bestMove = move;
-                }
-                beta = Math.Min(beta, ret.Item1);
-            }
-            if (beta <= alpha)
-            {
-                break;
-            }
-
-            if (timer.MillisecondsElapsedThisTurn >= millisecondsPerSearch) break;
         }
 
-
-        return (bestEval, bestMove);
-
+        return alpha;
     }
 
-    Move[] Order(Move[] moves)
+    int QuiescenceSearch(Board board, int alpha, int beta)
+    {
+        int eval = Evaluate(board);
+        if (eval >= beta) return beta;
+        alpha = (int)MathF.Max(alpha, eval);
+
+        Move[] captureMoves = Order(board.GetLegalMoves(true), board);
+        foreach (Move captureMove in captureMoves)
+        {
+            board.MakeMove(captureMove);
+            eval = -QuiescenceSearch(board, -beta, -alpha);
+            board.UndoMove(captureMove);
+
+            if (eval >= beta) return beta;
+            alpha = (int)MathF.Max(alpha, eval);
+        }
+        return alpha;
+    }
+
+    Move[] Order(Move[] moves, Board board)
     {
         Move[] returnThis = new Move[moves.Length];
+
         Dictionary<Move, int> orderedMoves = new Dictionary<Move, int>();
         foreach (Move move in moves)
         {
+            if (move.IsNull) continue;
+
+
+            int moveScoreGuess = 0;
+            if (move.IsCapture) moveScoreGuess += 10 * POINT_VALUES[(int)move.CapturePieceType - 1] - POINT_VALUES[(int)move.MovePieceType - 1]; // This should be running for null moves SO WHY IS IT??!?!?!?!
+            if (move.IsPromotion) moveScoreGuess += POINT_VALUES[(int)move.PromotionPieceType - 1];
+            if (board.SquareIsAttackedByOpponent(move.TargetSquare)) moveScoreGuess -= POINT_VALUES[(int)move.MovePieceType - 1];
             orderedMoves.Add(move, (int)move.CapturePieceType);
         }
         int counter = 0;
@@ -105,6 +116,8 @@ public class MyBot : IChessBot
         return returnThis;
 
     }
+
+
 
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
 
@@ -131,6 +144,17 @@ public class MyBot : IChessBot
         -50,-40,-30,-20,-20,-30,-40,-50,
     };
 
+    private float GetProgression(Board board)
+    {
+        return 1 - (BitboardHelper.GetNumberOfSetBits(board.AllPiecesBitboard) / 32f);
+    }
+
+    private float Lerp(float a, float b, float t)
+    {
+        return a + (b - a) * t;
+    }
+
+
 
     public int Evaluate(Board board)
     {
@@ -147,31 +171,6 @@ public class MyBot : IChessBot
             + (pieceLists[3].Count - pieceLists[9].Count) * POINT_VALUES[3]
             + (pieceLists[4].Count - pieceLists[10].Count) * POINT_VALUES[4];
         material *= perspective;
-
-
-        // Mobility
-        int mobility = 0;
-        foreach (Move move in board.GetLegalMoves())
-        {
-            PieceType movingType = move.MovePieceType;
-            PieceType capturedType = move.CapturePieceType;
-            switch (move.MovePieceType)
-            {
-                case PieceType.Knight:
-                    mobility += 100;
-                    break;
-                case PieceType.Rook:
-                    mobility += (int)Lerp(10, 50, progression);
-                    break;
-                case PieceType.Bishop:
-                    mobility += 40;
-                    break;
-                case PieceType.Queen:
-                    mobility += 60;
-                    break;
-            }
-        }
-        mobility = (int)(mobility * (1 - progression));
 
 
         // King Safety
@@ -211,6 +210,6 @@ public class MyBot : IChessBot
         }
         endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 2));
 
-        return material + mobility + kingPositioning + pawnDevelopment + endgameBonus;
+        return material + kingPositioning + pawnDevelopment + endgameBonus;
     }
 }
