@@ -9,76 +9,68 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        // REMOVEME
-        Console.Write("Pruned this many times on last move: ");
-        Console.WriteLine(pruneTimes);
-        Console.Write("Searched this many nodes on last move: ");
-        Console.WriteLine(searchedNodes);
-        pruneTimes = 0;
-        searchedNodes = 0;
-        return Search(board, timer, 7, int.MinValue, int.MaxValue, false).Item2;
-        
+        areWeWhite = board.IsWhiteToMove; // Update areWeWhite
+        return Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
     }
 
-    private int searchedNodes = 0; // REMOVEME
-    private int pruneTimes = 0; // REMOVEME
+    private bool areWeWhite;
+    private int searchDepth = 6;
     (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
     {
-        searchedNodes += 1; // REMOVEME
         if (depth == 0)
         {
-            return (Evaluate(board), new Move());
+            return (Evaluate(board), new Move()); // Base case, use Evaluate
         }
-        Move[] moves = Order(board.GetLegalMoves());
-        if (maximizingPlayer) // maximizing
+        if (board.IsInCheckmate())
         {
-            int maxEval = int.MinValue;
-            Move bestMove = new Move();
-            foreach (Move move in moves)
+            // If we are white and white's turn, or black and black's turn, we lose, otherwise we win
+            if ((areWeWhite && board.IsWhiteToMove) || (!areWeWhite && !board.IsWhiteToMove))
             {
-                board.MakeMove(move);
-                var ret = Search(board, timer, depth - 1, alpha, beta, !maximizingPlayer);
-                int eval = ret.Item1;
-                if (maxEval < eval)
-                {
-                    maxEval = eval;
-                    bestMove = move;
-                  
-                }
-                board.UndoMove(move);
-                alpha = Math.Max(alpha, eval);
-                if (beta <= alpha)
-                {
-                    pruneTimes++; //REMOVEME
-                    break;
-                }
+                return (int.MinValue, new Move());
             }
-            return (maxEval, bestMove);
+            else
+            {
+                return (int.MaxValue, new Move());
+            }
         }
+        Move[] moves = Order(board.GetLegalMoves()); // the ordered, legal moves
+        int bestEval = maximizingPlayer ? int.MinValue : int.MaxValue;
+        Move bestMove = new Move();
+        foreach (Move move in moves)
         {
-            int minEval = int.MaxValue;
-            Move bestMove = new Move();
-            foreach (Move move in moves)
+            board.MakeMove(move);
+            var ret = Search(board, timer, depth - 1, alpha, beta, !maximizingPlayer); // recursion :)
+            board.UndoMove(move);
+            if (maximizingPlayer) // Our turn
             {
-                board.MakeMove(move);
-                var ret = Search(board, timer, depth - 1, alpha, beta, !maximizingPlayer);
-                int eval = ret.Item1;
-                if (minEval > eval)
+                
+                if (ret.Item1 > bestEval)
                 {
-                    minEval = eval;
+                    bestEval = ret.Item1;
                     bestMove = move;
-                    
                 }
-                beta = Math.Min(beta, eval);
-                board.UndoMove(move);
-                if (beta <= alpha)
-                {
-                    pruneTimes++; // REMOVEME
-                    break;
-                }
+
+                alpha = Math.Max(alpha, ret.Item1);
+                
             }
-            return (minEval, bestMove);
+            else // not our turn
+            {
+                if (ret.Item1 < bestEval)
+                {
+                    bestEval = ret.Item1;
+                    bestMove = move;
+                }
+                beta = Math.Min(beta, ret.Item1);
+            }
+            if (beta <= alpha)
+            {
+                break;
+            }
         }
+
+       
+        return (bestEval, bestMove);
+       
     }
 
     Move[] Order(Move[] moves)
@@ -87,14 +79,8 @@ public class MyBot : IChessBot
         Dictionary<Move, int> orderedMoves = new Dictionary<Move, int>();
         foreach (Move move in moves)
         {
-            int movePotentialValue = 0;
-            if (move.IsCapture)
-            {
-                movePotentialValue = (int) move.CapturePieceType;
-            }
-            orderedMoves.Add(move, movePotentialValue);
+            orderedMoves.Add(move, (int)move.CapturePieceType);
         }
-
         int counter = 0;
         foreach (var k in orderedMoves.OrderByDescending(x => x.Value))
         {
