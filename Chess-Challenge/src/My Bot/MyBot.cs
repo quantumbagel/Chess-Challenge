@@ -15,6 +15,7 @@ public class MyBot : IChessBot
 
     private bool areWeWhite;
     private int searchDepth = 6;
+    private int millisecondsPerSearch = 3000;
     (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
     {
         if (depth == 0)
@@ -66,6 +67,8 @@ public class MyBot : IChessBot
             {
                 break;
             }
+
+            if (timer.MillisecondsElapsedThisTurn >= millisecondsPerSearch) break;
         }
 
 
@@ -93,8 +96,6 @@ public class MyBot : IChessBot
     }
 
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
-    int[] PROTECTED_VALUES = new int[] { 50, 35, 30, 10, 4 };
-    float[] PROTECTOR_VALUES = new float[] { 8, 4.5f, 4, 3, 2.5f, 2 };
 
     int[] king_mg_table = new int[]
     {
@@ -118,54 +119,6 @@ public class MyBot : IChessBot
         -30,-20,-10,  0,  0,-10,-20,-30,
         -50,-40,-30,-20,-20,-30,-40,-50,
     };
-
-    private void FillPartialAttackTable(ref ushort[,] table, Board board, bool isWhite)
-    {
-        foreach (PieceType pieceType in Enum.GetValues(typeof(PieceType)))
-        {
-            ulong pieceBB = board.GetPieceBitboard(pieceType, isWhite);
-            while (pieceBB != 0)
-            {
-                Square square = new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref pieceBB));
-                ulong attacks = 0;
-                ushort data = 0;
-                switch (pieceType)
-                {
-                    case PieceType.Pawn:
-                        attacks = BitboardHelper.GetPawnAttacks(square, isWhite);
-                        data = 1;
-                        break;
-                    case PieceType.Knight:
-                        attacks = BitboardHelper.GetKnightAttacks(square);
-                        data = 4; 
-                        break;
-                    case PieceType.Bishop:
-                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
-                        data = 32; 
-                        break;
-                    case PieceType.Rook:
-                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
-                        data = 256; 
-                        break;
-                    case PieceType.Queen:
-                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
-                        data = 2048; 
-                        break;
-                    case PieceType.King:
-                        attacks = BitboardHelper.GetKingAttacks(square);
-                        data = 32768; 
-                        break;
-
-                }
-
-                while (attacks != 0)
-                {
-                    int index = BitboardHelper.ClearAndGetIndexOfLSB(ref attacks);
-                    table[(isWhite) ? 1 : 0, index] += data;
-                }
-            }
-        }
-    }
 
 
     public int Evaluate(Board board)
@@ -191,35 +144,6 @@ public class MyBot : IChessBot
         }
         progression /= 32;
 
-        //Attack Tables, attack_table[0, x] = black pieces attacking square x, attack_table[1, x] = white pieces attacking square x
-        //data format: num pawns [2 bits] - num knights, bishops, rooks, [3 bits each] -  num queens [4 bits] - is king attacking [1 bit]
-        ushort[,] attack_table = new ushort[2, 64];
-        FillPartialAttackTable(ref attack_table, board, true);
-        FillPartialAttackTable(ref attack_table, board, false);
-
-
-        //Connectivity
-        ///*
-        int connectivity = 0;
-        foreach (PieceList pl in pieceLists)
-        {
-            if (pl.TypeOfPieceInList == PieceType.King) continue;
-            foreach (Piece piece in pl)
-            {
-                ushort defense_data = attack_table[(piece.IsWhite) ? 1 : 0, piece.Square.Index];
-                float to_add = 0;
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(8, MathF.Sqrt(defense_data % 4));
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(4.5f, MathF.Sqrt((defense_data / 4) % 8));
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(4, MathF.Sqrt((defense_data / 32) % 8));
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(3, MathF.Sqrt((defense_data / 256) % 8));
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(2.5f, MathF.Sqrt(defense_data / 32768));
-                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(2, MathF.Sqrt((defense_data / 2048) % 16));
-                connectivity += (int)to_add * ((piece.IsWhite) ? 1 : -1);
-            }
-        }
-        connectivity *= perspective;
-        //*/
-
 
         // King Safety
         int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
@@ -228,6 +152,36 @@ public class MyBot : IChessBot
         int blackKingPositioning = king_mg_table[blackKingRelativeIndex] + (int)(progression * (king_eg_table[blackKingRelativeIndex] - king_mg_table[blackKingRelativeIndex]));
         int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
 
-        return material + connectivity + kingPositioning;
+
+        //Pawn Development
+        int pawnDevelopment = 0;
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, board.IsWhiteToMove))
+        {
+            pawnDevelopment += 50 - 15 * (7 - pawn.Square.Rank);
+        }
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, !board.IsWhiteToMove))
+        {
+            pawnDevelopment -= 50 - 15 * (7 - pawn.Square.Rank);
+        }
+        pawnDevelopment = (int)(pawnDevelopment * progression);
+
+
+        //Endgame Bonus
+        int endgameBonus = 0;
+        ulong ourBB = (board.IsWhiteToMove) ? board.WhitePiecesBitboard : board.BlackPiecesBitboard;
+        Square enemyKingSquare = board.GetKingSquare(!board.IsWhiteToMove);
+        while (ourBB != 0)
+        {
+            Piece piece = board.GetPiece(new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref ourBB)));
+            if (piece.IsPawn) continue;
+            int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
+            if (chebyshev > 1)
+            {
+                endgameBonus += 100 - 20 * (chebyshev - 2);
+            }
+        }
+        endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 1.5f));
+
+        return material + kingPositioning + pawnDevelopment;
     }
 }
