@@ -13,6 +13,17 @@ public class MyBot : IChessBot
         return Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
     }
 
+    private float GetProgression(Board board)
+    {
+        return 1 - (BitboardHelper.GetNumberOfSetBits(board.AllPiecesBitboard) / 32f);
+    }
+
+    private float Lerp(float a, float b, float t)
+    {
+        return a + (b - a) * t;
+    }
+
+
     private bool areWeWhite;
     private int searchDepth = 6;
     private int millisecondsPerSearch = 3000;
@@ -123,9 +134,9 @@ public class MyBot : IChessBot
 
     public int Evaluate(Board board)
     {
+        // progression is 0 at early game, 1 at late game
+        float progression = GetProgression(board);
 
-        if (board.IsInCheckmate()) return -100000000;
-        
 
         // Material
         PieceList[] pieceLists = board.GetAllPieceLists();
@@ -137,12 +148,29 @@ public class MyBot : IChessBot
         int perspective = (board.IsWhiteToMove) ? 1 : -1;
         material *= perspective;
 
-        // progression is 0 at early game, 1 at late game
-        float progression = 32;
-        foreach (PieceList pl in pieceLists) {
-            progression -= pl.Count;
+
+        // Mobility
+        int mobility = 0;
+        foreach (Move move in board.GetLegalMoves())
+        {
+            PieceType movingType = move.MovePieceType;
+            PieceType capturedType = move.CapturePieceType;
+            switch (move.MovePieceType)
+            {
+                case PieceType.Knight:
+                    mobility += 175;
+                    break;
+                case PieceType.Rook:
+                    mobility += 50 + (int)(150 * progression);
+                    break;
+                case PieceType.Bishop:
+                    mobility += 125;
+                    break;
+                case PieceType.Queen:
+                    mobility += 225;
+                    break;
+            }
         }
-        progression /= 32;
 
 
         // King Safety
@@ -177,11 +205,11 @@ public class MyBot : IChessBot
             int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
             if (chebyshev > 1)
             {
-                endgameBonus += 100 - 20 * (chebyshev - 2);
+                endgameBonus += ((piece.IsKing) ? 75 : 100) - 25 * (chebyshev - 2); // Give less points for kings so we have less chance of repeating
             }
         }
-        endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 1.5f));
+        endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 2));
 
-        return material + kingPositioning + pawnDevelopment;
+        return material + mobility + kingPositioning + pawnDevelopment + endgameBonus;
     }
 }
