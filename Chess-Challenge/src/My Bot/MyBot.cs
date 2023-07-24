@@ -158,19 +158,20 @@ public class MyBot : IChessBot
             switch (move.MovePieceType)
             {
                 case PieceType.Knight:
-                    mobility += 175;
+                    mobility += 100;
                     break;
                 case PieceType.Rook:
-                    mobility += (int)Lerp(10, 80, progression);
+                    mobility += (int)Lerp(10, 50, progression);
                     break;
                 case PieceType.Bishop:
-                    mobility += 75;
+                    mobility += 40;
                     break;
                 case PieceType.Queen:
-                    mobility += 100;
+                    mobility += 60;
                     break;
             }
         }
+        mobility = (int)(mobility * (1 - progression));
 
 
         // King Safety
