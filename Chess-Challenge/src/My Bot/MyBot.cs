@@ -1,26 +1,95 @@
-﻿using ChessChallenge.API;
-using System;
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Linq;
+using System.Net.Mail;
+using ChessChallenge.API;
 
 public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        Move[] moves = board.GetLegalMoves();
-        Move bestMove = Move.NullMove;
-        int bestMoveEval = int.MinValue;
+        areWeWhite = board.IsWhiteToMove; // Update areWeWhite
+        return Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
+    }
+
+    private bool areWeWhite;
+    private int searchDepth = 6;
+    (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
+    {
+        if (depth == 0)
+        {
+            return (Evaluate(board), new Move()); // Base case, use Evaluate
+        }
+        if (board.IsInCheckmate())
+        {
+            // If we are white and white's turn, or black and black's turn, we lose, otherwise we win
+            if ((areWeWhite && board.IsWhiteToMove) || (!areWeWhite && !board.IsWhiteToMove))
+            {
+                return (int.MinValue, new Move());
+            }
+            else
+            {
+                return (int.MaxValue, new Move());
+            }
+        }
+        Move[] moves = Order(board.GetLegalMoves()); // the ordered, legal moves
+        int bestEval = maximizingPlayer ? int.MinValue : int.MaxValue;
+        Move bestMove = new Move();
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = Evaluate(board);
-            if (eval > bestMoveEval)
-            {
-                bestMove = move;
-                bestMoveEval = eval;
-            }
+            var ret = Search(board, timer, depth - 1, alpha, beta, !maximizingPlayer); // recursion :)
             board.UndoMove(move);
+            if (maximizingPlayer) // Our turn
+            {
+
+                if (ret.Item1 > bestEval)
+                {
+                    bestEval = ret.Item1;
+                    bestMove = move;
+                }
+
+                alpha = Math.Max(alpha, ret.Item1);
+
+            }
+            else // not our turn
+            {
+                if (ret.Item1 < bestEval)
+                {
+                    bestEval = ret.Item1;
+                    bestMove = move;
+                }
+                beta = Math.Min(beta, ret.Item1);
+            }
+            if (beta <= alpha)
+            {
+                break;
+            }
         }
 
-        return bestMove;
+
+        return (bestEval, bestMove);
+
+    }
+
+    Move[] Order(Move[] moves)
+    {
+        Move[] returnThis = new Move[moves.Length];
+        Dictionary<Move, int> orderedMoves = new Dictionary<Move, int>();
+        foreach (Move move in moves)
+        {
+            orderedMoves.Add(move, (int)move.CapturePieceType);
+        }
+        int counter = 0;
+        foreach (var k in orderedMoves.OrderByDescending(x => x.Value))
+        {
+            returnThis[counter] = k.Key;
+            counter++;
+        }
+
+        return returnThis;
+
     }
 
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
@@ -48,9 +117,59 @@ public class MyBot : IChessBot
         -50,-40,-30,-20,-20,-30,-40,-50,
     };
 
+    private void FillPartialAttackTable(ref ushort[,] table, Board board, bool isWhite)
+    {
+        foreach (PieceType pieceType in Enum.GetValues(typeof(PieceType)))
+        {
+            ulong pieceBB = board.GetPieceBitboard(pieceType, isWhite);
+            while (pieceBB != 0)
+            {
+                Square square = new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref pieceBB));
+                ulong attacks = 0;
+                ushort data = 0;
+                switch (pieceType)
+                {
+                    case PieceType.Pawn:
+                        attacks = BitboardHelper.GetPawnAttacks(square, isWhite);
+                        data = 1;
+                        break;
+                    case PieceType.Knight:
+                        attacks = BitboardHelper.GetKnightAttacks(square);
+                        data = 4; 
+                        break;
+                    case PieceType.Bishop:
+                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
+                        data = 32; 
+                        break;
+                    case PieceType.Rook:
+                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
+                        data = 256; 
+                        break;
+                    case PieceType.Queen:
+                        attacks = BitboardHelper.GetSliderAttacks(pieceType, square, board.AllPiecesBitboard);
+                        data = 2048; 
+                        break;
+                    case PieceType.King:
+                        attacks = BitboardHelper.GetKingAttacks(square);
+                        data = 32768; 
+                        break;
+
+                }
+
+                while (attacks != 0)
+                {
+                    int index = BitboardHelper.ClearAndGetIndexOfLSB(ref attacks);
+                    table[(isWhite) ? 1 : 0, index] += data;
+                }
+            }
+        }
+    }
+
 
     public int Evaluate(Board board)
     {
+
+        if (board.IsInCheckmate()) return -100000000;
         
         // Material
         PieceList[] pieceLists = board.GetAllPieceLists();
@@ -69,45 +188,20 @@ public class MyBot : IChessBot
         }
         progression /= 32;
 
-        // Mobility
-        int mobility = 0;
-        int offense = 0;
-        bool skipped = board.TrySkipTurn();
-        if (skipped)
-        {
-            foreach (Move move in board.GetLegalMoves())
-            {
-                switch (move.MovePieceType)
-                {
-                    case PieceType.Knight:
-                        mobility += 175;
-                        break;
-                    case PieceType.Rook:
-                        mobility += 50 + (int)(150 * progression);
-                        break;
-                    case PieceType.Bishop:
-                        mobility += 125;
-                        break;
-                    case PieceType.Queen:
-                        mobility += 250;
-                        break;
-                }
-
-                if (move.IsCapture)
-                {
-                    offense += (int) MathF.Max(0, POINT_VALUES[(int)move.CapturePieceType - 1] - POINT_VALUES[(int)move.MovePieceType - 1]);
-                }
-            }
-
-            board.UndoSkipTurn();
-        }
+        //Attack Tables, attack_table[0, x] = black pieces attacking square x, attack_table[1, x] = white pieces attacking square x
+        //data format: num pawns [2 bits] - num knights, bishops, rooks, [3 bits each] -  num queens [4 bits] - is king attacking [1 bit]
+        ushort[,] attack_table = new ushort[2, 64];
+        FillPartialAttackTable(ref attack_table, board, true);
+        FillPartialAttackTable(ref attack_table, board, false);
 
 
         // King Safety
-        Square kingSquare = board.GetKingSquare(board.IsWhiteToMove);
-        int kingRelativeIndex = (board.IsWhiteToMove) ? kingSquare.Index : 64 - kingSquare.Index;
-        int kingPositioning = king_mg_table[kingRelativeIndex] + (int)(progression * (king_eg_table[kingRelativeIndex] - king_mg_table[kingRelativeIndex]));
+        int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
+        int blackKingRelativeIndex = 64 - board.GetKingSquare(board.IsWhiteToMove).Index;
+        int whiteKingPositioning = king_mg_table[whiteKingRelativeIndex] + (int)(progression * (king_eg_table[whiteKingRelativeIndex] - king_mg_table[whiteKingRelativeIndex]));
+        int blackKingPositioning = king_mg_table[blackKingRelativeIndex] + (int)(progression * (king_eg_table[blackKingRelativeIndex] - king_mg_table[blackKingRelativeIndex]));
+        int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
 
-        return material + mobility + offense + kingPositioning;
+        return material + kingPositioning;
     }
 }
