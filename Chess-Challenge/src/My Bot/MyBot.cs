@@ -93,6 +93,8 @@ public class MyBot : IChessBot
     }
 
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
+    int[] PROTECTED_VALUES = new int[] { 50, 35, 30, 10, 4 };
+    float[] PROTECTOR_VALUES = new float[] { 8, 4.5f, 4, 3, 2.5f, 2 };
 
     int[] king_mg_table = new int[]
     {
@@ -171,6 +173,7 @@ public class MyBot : IChessBot
 
         if (board.IsInCheckmate()) return -100000000;
         
+
         // Material
         PieceList[] pieceLists = board.GetAllPieceLists();
         int material = (pieceLists[0].Count - pieceLists[6].Count) * POINT_VALUES[0]
@@ -195,13 +198,36 @@ public class MyBot : IChessBot
         FillPartialAttackTable(ref attack_table, board, false);
 
 
+        //Connectivity
+        ///*
+        int connectivity = 0;
+        foreach (PieceList pl in pieceLists)
+        {
+            if (pl.TypeOfPieceInList == PieceType.King) continue;
+            foreach (Piece piece in pl)
+            {
+                ushort defense_data = attack_table[(piece.IsWhite) ? 1 : 0, piece.Square.Index];
+                float to_add = 0;
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(8, MathF.Sqrt(defense_data % 4));
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(4.5f, MathF.Sqrt((defense_data / 4) % 8));
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(4, MathF.Sqrt((defense_data / 32) % 8));
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(3, MathF.Sqrt((defense_data / 256) % 8));
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(2.5f, MathF.Sqrt(defense_data / 32768));
+                to_add += PROTECTED_VALUES[(int)piece.PieceType - 1] * MathF.Pow(2, MathF.Sqrt((defense_data / 2048) % 16));
+                connectivity += (int)to_add * ((piece.IsWhite) ? 1 : -1);
+            }
+        }
+        connectivity *= perspective;
+        //*/
+
+
         // King Safety
         int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
-        int blackKingRelativeIndex = 64 - board.GetKingSquare(board.IsWhiteToMove).Index;
+        int blackKingRelativeIndex = 63 - board.GetKingSquare(board.IsWhiteToMove).Index;
         int whiteKingPositioning = king_mg_table[whiteKingRelativeIndex] + (int)(progression * (king_eg_table[whiteKingRelativeIndex] - king_mg_table[whiteKingRelativeIndex]));
         int blackKingPositioning = king_mg_table[blackKingRelativeIndex] + (int)(progression * (king_eg_table[blackKingRelativeIndex] - king_mg_table[blackKingRelativeIndex]));
         int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
 
-        return material + kingPositioning;
+        return material + connectivity + kingPositioning;
     }
 }
