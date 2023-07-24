@@ -26,7 +26,7 @@ public class MyBot : IChessBot
 
     private bool areWeWhite;
     private int searchDepth = 6;
-    private int millisecondsPerSearch = 3000;
+    private int millisecondsPerSearch = 2000;
     (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
     {
         if (depth == 0)
@@ -136,6 +136,7 @@ public class MyBot : IChessBot
     {
         // progression is 0 at early game, 1 at late game
         float progression = GetProgression(board);
+        int perspective = (board.IsWhiteToMove) ? 1 : -1;
 
 
         // Material
@@ -145,7 +146,6 @@ public class MyBot : IChessBot
             + (pieceLists[2].Count - pieceLists[8].Count) * POINT_VALUES[2]
             + (pieceLists[3].Count - pieceLists[9].Count) * POINT_VALUES[3]
             + (pieceLists[4].Count - pieceLists[10].Count) * POINT_VALUES[4];
-        int perspective = (board.IsWhiteToMove) ? 1 : -1;
         material *= perspective;
 
 
@@ -161,13 +161,13 @@ public class MyBot : IChessBot
                     mobility += 175;
                     break;
                 case PieceType.Rook:
-                    mobility += 50 + (int)(150 * progression);
+                    mobility += (int)Lerp(10, 80, progression);
                     break;
                 case PieceType.Bishop:
-                    mobility += 125;
+                    mobility += 75;
                     break;
                 case PieceType.Queen:
-                    mobility += 225;
+                    mobility += 100;
                     break;
             }
         }
@@ -176,8 +176,8 @@ public class MyBot : IChessBot
         // King Safety
         int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
         int blackKingRelativeIndex = 63 - board.GetKingSquare(board.IsWhiteToMove).Index;
-        int whiteKingPositioning = king_mg_table[whiteKingRelativeIndex] + (int)(progression * (king_eg_table[whiteKingRelativeIndex] - king_mg_table[whiteKingRelativeIndex]));
-        int blackKingPositioning = king_mg_table[blackKingRelativeIndex] + (int)(progression * (king_eg_table[blackKingRelativeIndex] - king_mg_table[blackKingRelativeIndex]));
+        int whiteKingPositioning = (int)Lerp(king_mg_table[whiteKingRelativeIndex], king_eg_table[whiteKingRelativeIndex], progression);
+        int blackKingPositioning = (int)Lerp(king_mg_table[blackKingRelativeIndex], king_eg_table[blackKingRelativeIndex], progression);
         int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
 
 
