@@ -10,17 +10,24 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         areWeWhite = board.IsWhiteToMove; // Update areWeWhite
-        return Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
+
+        Move searchResults = Search(board, timer, searchDepth, int.MinValue, int.MaxValue, true).Item2;
+        
+        if (lastFourMoves[3] != Move.NullMove && lastFourMoves[0].Equals(lastFourMoves[2]))
+        {
+            return secondBest;
+        }
+
+        return searchResults;
     }
 
     private bool areWeWhite;
     private int searchDepth = 6;
+    private Move[] lastFourMoves = new Move[4];
+    private Move secondBest;
     (int, Move) Search(Board board, Timer timer, int depth, int alpha, int beta, bool maximizingPlayer)
     {
-        if (depth == 0)
-        {
-            return (Evaluate(board), new Move()); // Base case, use Evaluate
-        }
+        
         if (board.IsInCheckmate())
         {
             // If we are white and white's turn, or black and black's turn, we lose, otherwise we win
@@ -28,14 +35,19 @@ public class MyBot : IChessBot
             {
                 return (int.MinValue, new Move());
             }
-            else
             {
                 return (int.MaxValue, new Move());
             }
         }
+        if (depth == 0)
+        {
+            return (Evaluate(board), new Move()); // Base case, use Evaluate
+        }
         Move[] moves = Order(board.GetLegalMoves()); // the ordered, legal moves
         int bestEval = maximizingPlayer ? int.MinValue : int.MaxValue;
         Move bestMove = new Move();
+        int secondBestEval = maximizingPlayer ? int.MinValue : int.MaxValue;
+        Move secondBestMove = new Move();
         foreach (Move move in moves)
         {
             board.MakeMove(move);
@@ -44,10 +56,16 @@ public class MyBot : IChessBot
             if (maximizingPlayer) // Our turn
             {
                 
-                if (ret.Item1 > bestEval)
+                if (ret.Item1 >= bestEval)
                 {
                     bestEval = ret.Item1;
                     bestMove = move;
+                }
+
+                if (ret.Item1 < bestEval && ret.Item1 > secondBestEval)
+                {
+                    secondBestEval = ret.Item1;
+                    secondBestMove = move;
                 }
 
                 alpha = Math.Max(alpha, ret.Item1);
@@ -55,10 +73,15 @@ public class MyBot : IChessBot
             }
             else // not our turn
             {
-                if (ret.Item1 < bestEval)
+                if (ret.Item1 <= bestEval)
                 {
                     bestEval = ret.Item1;
                     bestMove = move;
+                }
+                if (ret.Item1 > bestEval && ret.Item1 < secondBestEval)
+                {
+                    secondBestEval = ret.Item1;
+                    secondBestMove = move;
                 }
                 beta = Math.Min(beta, ret.Item1);
             }
@@ -68,7 +91,16 @@ public class MyBot : IChessBot
             }
         }
 
-       
+        if (depth == searchDepth)
+        {
+            lastFourMoves[3] = lastFourMoves[2];
+            lastFourMoves[2] = lastFourMoves[1];
+            lastFourMoves[1] = lastFourMoves[0];
+            lastFourMoves[0] = bestMove;
+            secondBest = secondBestMove;
+        }
+
+        
         return (bestEval, bestMove);
        
     }
@@ -93,16 +125,40 @@ public class MyBot : IChessBot
     }
     int[] POINT_VALUES = new int[] { 100, 350, 350, 525, 1000 };
 
+    
+    int[] king_mg_table = new int[]
+    {
+        20, 30, 10,  0,  0, 10, 30, 20,
+        20, 20,  0,  0,  0,  0, 20, 20,
+        -10,-20,-20,-20,-20,-20,-20,-10,
+        -20,-30,-30,-40,-40,-30,-30,-20,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+    };
+    int[] king_eg_table = new int[]
+    {
+        -50,-30,-30,-30,-30,-30,-30,-50,
+        -30,-30,  0,  0,  0,  0,-30,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-20,-10,  0,  0,-10,-20,-30,
+        -50,-40,-30,-20,-20,-30,-40,-50,
+    };
+
+
     public int Evaluate(Board board)
     {
-        
         // Material
         PieceList[] pieceLists = board.GetAllPieceLists();
         int material = (pieceLists[0].Count - pieceLists[6].Count) * POINT_VALUES[0]
-                       + (pieceLists[1].Count - pieceLists[7].Count) * POINT_VALUES[1]
-                       + (pieceLists[2].Count - pieceLists[8].Count) * POINT_VALUES[2]
-                       + (pieceLists[3].Count - pieceLists[9].Count) * POINT_VALUES[3]
-                       + (pieceLists[4].Count - pieceLists[10].Count) * POINT_VALUES[4];
+            + (pieceLists[1].Count - pieceLists[7].Count) * POINT_VALUES[1]
+            + (pieceLists[2].Count - pieceLists[8].Count) * POINT_VALUES[2]
+            + (pieceLists[3].Count - pieceLists[9].Count) * POINT_VALUES[3]
+            + (pieceLists[4].Count - pieceLists[10].Count) * POINT_VALUES[4];
         int perspective = (board.IsWhiteToMove) ? 1 : -1;
         material *= perspective;
 
@@ -113,50 +169,44 @@ public class MyBot : IChessBot
         }
         progression /= 32;
 
-        // Mobility and Offense
-        int mobility = 0;
-        int offense = 0;
-        foreach (Move move in board.GetLegalMoves())
-        {
-            PieceType movingType = move.MovePieceType;
-            PieceType capturedType = move.CapturePieceType;
-            switch (movingType)
-            {
-                case PieceType.Pawn:
-                    mobility += 100;
-                    break;
-                case PieceType.Knight:
-                    mobility += 350;
-                    break;
-                case PieceType.Rook:
-                    mobility += 100 + (int)(300 * progression);
-                    break;
-                case PieceType.Bishop:
-                    mobility += 250;
-                    break;
-                case PieceType.Queen:
-                    mobility += 500;
-                    break;
-            }
-            // if (capturedType != PieceType.None && movingType != PieceType.None)
-            // {
-            //     offense += POINT_VALUES[(int)capturedType - 1] * 2 - POINT_VALUES[(int)movingType - 1];
-            // }
-        }
-        
+
         // King Safety
-        if (board.IsWhiteToMove)
+        int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
+        int blackKingRelativeIndex = 63 - board.GetKingSquare(board.IsWhiteToMove).Index;
+        int whiteKingPositioning = king_mg_table[whiteKingRelativeIndex] + (int)(progression * (king_eg_table[whiteKingRelativeIndex] - king_mg_table[whiteKingRelativeIndex]));
+        int blackKingPositioning = king_mg_table[blackKingRelativeIndex] + (int)(progression * (king_eg_table[blackKingRelativeIndex] - king_mg_table[blackKingRelativeIndex]));
+        int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
+
+
+        //Pawn Development
+        int pawnDevelopment = 0;
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, board.IsWhiteToMove))
         {
-
+            pawnDevelopment += 50 - 15 * (7 - pawn.Square.Rank);
         }
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, !board.IsWhiteToMove))
+        {
+            pawnDevelopment -= 50 - 15 * (7 - pawn.Square.Rank);
+        }
+        pawnDevelopment = (int)(pawnDevelopment * progression);
 
-        return material + mobility;
-    }
-    bool MoveIsCheckmate(Board board, Move move)
-    {
-        board.MakeMove(move);
-        bool isMate = board.IsInCheckmate();
-        board.UndoMove(move);
-        return isMate;
+
+        //Endgame Bonus
+        int endgameBonus = 0;
+        ulong ourBB = (board.IsWhiteToMove) ? board.WhitePiecesBitboard : board.BlackPiecesBitboard;
+        Square enemyKingSquare = board.GetKingSquare(!board.IsWhiteToMove);
+        while (ourBB != 0)
+        {
+            Piece piece = board.GetPiece(new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref ourBB)));
+            if (piece.IsPawn) continue;
+            int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
+            if (chebyshev > 1)
+            {
+                endgameBonus += 100 - 20 * (chebyshev - 2);
+            }
+        }
+        endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 1.5f));
+
+        return material + kingPositioning + pawnDevelopment;
     }
 }
