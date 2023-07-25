@@ -222,7 +222,7 @@ public class MyBot : IChessBot
             int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
             if (chebyshev > 1)
             {
-                endgameBonus += ((piece.IsKing) ? 75 : 100) - (int)(25 * MathF.Pow(chebyshev - 2, 1.5f)); // Give less points for kings so we have less chance of repeating
+                endgameBonus += ((piece.IsKing) ? 50 : 100) - (int)(25 * MathF.Pow(chebyshev - 2, 2)); // Give less points for kings so we have less chance of repeating
             }
         }
         endgameBonus = (int)(endgameBonus * progression);
