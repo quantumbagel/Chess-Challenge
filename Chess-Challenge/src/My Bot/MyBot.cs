@@ -9,16 +9,25 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        StartSearch(board, timer);
-        return bestMovesByDepth[0];
+        Board testBoard = Board.CreateBoardFromFEN("8/7k/4Q2p/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1");
+        StartSearch(testBoard, timer);
+        foreach (Move move in bestMovesByDepth)
+        {
+            Console.WriteLine(move);
+        }
+
+        //StartSearch(board, timer);
+        //return bestMovesByDepth[0];
+        return Move.NullMove;
     }
 
     private int maxSearchDepth = int.MaxValue;
     private int maxMillisecondsPerSearch = 1000;
     private bool isSearchCancelled;
 
-    private const int positiveInfinity = int.MaxValue - 10;
-    private const int negativeInfinity = int.MinValue + 10;
+    const int immediateMateScore = 100000;
+    const int positiveInfinity = 9999999;
+    const int negativeInfinity = -positiveInfinity;
 
     private List<Move> bestMovesByDepth;
 
@@ -26,7 +35,7 @@ public class MyBot : IChessBot
     {
         isSearchCancelled = false;
         bestMovesByDepth = new List<Move>();
-        for (int searchDepth = 1; searchDepth <= maxSearchDepth; searchDepth++)
+        for (int searchDepth = 1; searchDepth <= 6; searchDepth++)
         {
             bestMovesByDepth.Add(Move.NullMove);
             Search(board, timer, searchDepth, 0, negativeInfinity, positiveInfinity);
@@ -39,11 +48,25 @@ public class MyBot : IChessBot
     {
         if (timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch)
         {
-            isSearchCancelled = true;
-            return 0;
+            //isSearchCancelled = true;
+            //return 0;
         }
 
         if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
+
+        if (plyFromRoot > 0)
+        {
+            // Skip this position if a mating sequence has already been found earlier in
+            // the search, which would be shorter than any mate we could find from here.
+            // This is done by observing that alpha can't possibly be worse (and likewise
+            // beta can't  possibly be better) than being mated in the current position.
+            alpha = Math.Max(alpha, -immediateMateScore + plyFromRoot);
+            beta = Math.Min(beta, immediateMateScore - plyFromRoot);
+            if (alpha >= beta)
+            {
+                return alpha;
+            }
+        }
 
         // Order the moves so we get more out of the beta pruning
         Move[] moves = Order(board.GetLegalMoves(), board, bestMovesByDepth[plyFromRoot]);
@@ -220,10 +243,7 @@ public class MyBot : IChessBot
             Piece piece = board.GetPiece(new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref ourBB)));
             if (piece.IsPawn) continue;
             int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
-            if (chebyshev > 1)
-            {
-                endgameBonus += ((piece.IsKing) ? 50 : 100) - (int)(25 * MathF.Pow(chebyshev - 2, 2)); // Give less points for kings so we have less chance of repeating
-            }
+            endgameBonus += ((piece.IsKing) ? 50 : 100) - (int)(25 * MathF.Pow(chebyshev - 1, 2)); // Give less points for kings so we have less chance of repeating
         }
         endgameBonus = (int)(endgameBonus * progression);
 
