@@ -10,29 +10,26 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         StartSearch(board, timer);
-        return bestMove;
+        return bestMovesByDepth[0];
     }
 
-    private int maxSearchDepth = 6;
-    private int maxMillisecondsPerSearch = 5000;
-    private bool isSearchCancelled = false;
+    private int maxSearchDepth = int.MaxValue;
+    private int maxMillisecondsPerSearch = 1000;
+    private bool isSearchCancelled;
 
-    private Move bestMoveThisIteration;
-    private int bestEvalThisIteration;
+    private const int positiveInfinity = int.MaxValue - 10;
+    private const int negativeInfinity = int.MinValue + 10;
 
-    private Move bestMove = Move.NullMove;
-    private int bestEval = int.MinValue;
+    private List<Move> bestMovesByDepth;
 
     void StartSearch(Board board, Timer timer)
     {
+        isSearchCancelled = false;
+        bestMovesByDepth = new List<Move>();
         for (int searchDepth = 1; searchDepth <= maxSearchDepth; searchDepth++)
         {
-            bestMoveThisIteration = Move.NullMove;
-            bestEvalThisIteration = int.MinValue;
-            Search(board, timer, searchDepth, 0, int.MinValue, int.MaxValue);
-
-            bestMove = bestMoveThisIteration;
-            bestEval = bestEvalThisIteration;
+            bestMovesByDepth.Add(Move.NullMove);
+            Search(board, timer, searchDepth, 0, negativeInfinity, positiveInfinity);
             if (isSearchCancelled) break;
         }
     }
@@ -42,15 +39,16 @@ public class MyBot : IChessBot
     {
         if (timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch)
         {
+            isSearchCancelled = true;
             return 0;
         }
 
         if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
 
         // Order the moves so we get more out of the beta pruning
-        Move[] moves = Order(board.GetLegalMoves(), board);
+        Move[] moves = Order(board.GetLegalMoves(), board, bestMovesByDepth[plyFromRoot]);
 
-        if (board.IsInCheckmate()) return -(int.MaxValue - plyFromRoot); // Checkmate
+        if (board.IsInCheckmate()) return negativeInfinity; // Checkmate
         else if (moves.Length == 0) return 0; // Stalemate
 
         foreach (Move move in moves)
@@ -63,8 +61,7 @@ public class MyBot : IChessBot
             if (eval > alpha)
             {
                 alpha = eval;
-                bestMoveThisIteration = plyFromRoot == 0 ? move : bestMoveThisIteration;
-                bestEvalThisIteration = plyFromRoot == 0 ? eval : bestEvalThisIteration;
+                bestMovesByDepth[plyFromRoot] = move;
             }
         }
 
@@ -77,7 +74,7 @@ public class MyBot : IChessBot
         if (eval >= beta) return beta;
         alpha = (int)MathF.Max(alpha, eval);
 
-        Move[] captureMoves = Order(board.GetLegalMoves(true), board);
+        Move[] captureMoves = Order(board.GetLegalMoves(true), board, Move.NullMove);
         foreach (Move captureMove in captureMoves)
         {
             board.MakeMove(captureMove);
@@ -90,23 +87,32 @@ public class MyBot : IChessBot
         return alpha;
     }
 
-    Move[] Order(Move[] moves, Board board)
+    Move[] Order(Move[] moves, Board board, Move putThisFirst)
     {
+        if (moves.Length == 0) return new Move[0];
         Move[] returnThis = new Move[moves.Length];
 
         Dictionary<Move, int> orderedMoves = new Dictionary<Move, int>();
         foreach (Move move in moves)
         {
+            if (move == putThisFirst) continue;
             if (move.IsNull) continue;
 
 
             int moveScoreGuess = 0;
-            if (move.IsCapture) moveScoreGuess += 10 * POINT_VALUES[(int)move.CapturePieceType - 1] - POINT_VALUES[(int)move.MovePieceType - 1]; // This should be running for null moves SO WHY IS IT??!?!?!?!
-            if (move.IsPromotion) moveScoreGuess += POINT_VALUES[(int)move.PromotionPieceType - 1];
-            if (board.SquareIsAttackedByOpponent(move.TargetSquare)) moveScoreGuess -= POINT_VALUES[(int)move.MovePieceType - 1];
-            orderedMoves.Add(move, (int)move.CapturePieceType);
+            if (move.IsCapture) moveScoreGuess += 10 * GetPointValue(move.CapturePieceType) - GetPointValue(move.MovePieceType); // This should be running for null moves SO WHY IS IT??!?!?!?!
+            if (move.IsPromotion) moveScoreGuess += GetPointValue(move.PromotionPieceType);
+            if (board.SquareIsAttackedByOpponent(move.TargetSquare)) moveScoreGuess -= GetPointValue(move.MovePieceType);
+            orderedMoves.Add(move, moveScoreGuess);
         }
+
         int counter = 0;
+        if (!putThisFirst.IsNull && moves.Contains(putThisFirst))
+        {
+            returnThis[0] = putThisFirst;
+            counter = 1;
+        }
+
         foreach (var k in orderedMoves.OrderByDescending(x => x.Value))
         {
             returnThis[counter] = k.Key;
@@ -115,6 +121,17 @@ public class MyBot : IChessBot
 
         return returnThis;
 
+    }
+
+    int GetPointValue(PieceType type)
+    {
+        switch (type)
+        {
+            case PieceType.None: return 0;
+            case PieceType.King: return int.MaxValue;
+            default:
+                return POINT_VALUES[(int)type - 1];
+        }
     }
 
 
@@ -174,8 +191,8 @@ public class MyBot : IChessBot
 
 
         // King Safety
-        int whiteKingRelativeIndex = board.GetKingSquare(board.IsWhiteToMove).Index;
-        int blackKingRelativeIndex = 63 - board.GetKingSquare(board.IsWhiteToMove).Index;
+        int whiteKingRelativeIndex = board.GetKingSquare(true).Index;
+        int blackKingRelativeIndex = new Square(board.GetKingSquare(false).File, 7 - board.GetKingSquare(false).Rank).Index;
         int whiteKingPositioning = (int)Lerp(king_mg_table[whiteKingRelativeIndex], king_eg_table[whiteKingRelativeIndex], progression);
         int blackKingPositioning = (int)Lerp(king_mg_table[blackKingRelativeIndex], king_eg_table[blackKingRelativeIndex], progression);
         int kingPositioning = (whiteKingPositioning - blackKingPositioning) * perspective;
@@ -205,10 +222,10 @@ public class MyBot : IChessBot
             int chebyshev = (int)MathF.Max(MathF.Abs(piece.Square.File - enemyKingSquare.File), MathF.Abs(piece.Square.Rank - enemyKingSquare.Rank));
             if (chebyshev > 1)
             {
-                endgameBonus += ((piece.IsKing) ? 75 : 100) - 25 * (chebyshev - 2); // Give less points for kings so we have less chance of repeating
+                endgameBonus += ((piece.IsKing) ? 75 : 100) - (int)(25 * MathF.Pow(chebyshev - 2, 1.5f)); // Give less points for kings so we have less chance of repeating
             }
         }
-        endgameBonus = (int)(endgameBonus * MathF.Pow(progression, 2));
+        endgameBonus = (int)(endgameBonus * progression);
 
         return material + kingPositioning + pawnDevelopment + endgameBonus;
     }
