@@ -9,19 +9,11 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        Board testBoard = Board.CreateBoardFromFEN("8/7k/4Q2p/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1");
-        StartSearch(testBoard, timer);
-        foreach (Move move in bestMovesByDepth)
-        {
-            Console.WriteLine(move);
-        }
-
-        //StartSearch(board, timer);
-        //return bestMovesByDepth[0];
-        return Move.NullMove;
+        StartSearch(board, timer);
+        return bestMovesByDepth[0];
     }
 
-    private int maxSearchDepth = int.MaxValue;
+    private int maxSearchDepth = 10;
     private int maxMillisecondsPerSearch = 1000;
     private bool isSearchCancelled;
 
@@ -29,30 +21,29 @@ public class MyBot : IChessBot
     const int positiveInfinity = 9999999;
     const int negativeInfinity = -positiveInfinity;
 
-    private List<Move> bestMovesByDepth;
+    private Move[] bestMovesByDepth;
 
     void StartSearch(Board board, Timer timer)
     {
         isSearchCancelled = false;
-        bestMovesByDepth = new List<Move>();
-        for (int searchDepth = 1; searchDepth <= 6; searchDepth++)
+        bestMovesByDepth = new Move[maxSearchDepth];
+        for (int searchDepth = 1; searchDepth <= maxSearchDepth; searchDepth++)
         {
-            bestMovesByDepth.Add(Move.NullMove);
+            bestMovesByDepth[searchDepth - 1] = Move.NullMove;
             Search(board, timer, searchDepth, 0, negativeInfinity, positiveInfinity);
             if (isSearchCancelled) break;
         }
     }
 
-
+    // From what I can gather, alpha is the best eval for us we've found so far. Beta is the best eval for the opponent so far at a higher depth (the alpha of the opponent).
+    // We prune branches when our eval is greater than our beta, hence worse for our opponent, so that means this branch won't even be considered by them and thus isn't worth searching.
     int Search(Board board, Timer timer, int plyRemaining, int plyFromRoot, int alpha, int beta)
     {
         if (timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch)
         {
-            //isSearchCancelled = true;
-            //return 0;
+            isSearchCancelled = true;
+            return 0;
         }
-
-        if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
 
         if (plyFromRoot > 0)
         {
@@ -68,11 +59,13 @@ public class MyBot : IChessBot
             }
         }
 
+        if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
+
         // Order the moves so we get more out of the beta pruning
         Move[] moves = Order(board.GetLegalMoves(), board, bestMovesByDepth[plyFromRoot]);
 
         if (board.IsInCheckmate()) return negativeInfinity; // Checkmate
-        else if (moves.Length == 0) return 0; // Stalemate
+        if (moves.Length == 0) return 0; // Stalemate
 
         foreach (Move move in moves)
         {
@@ -80,7 +73,8 @@ public class MyBot : IChessBot
             int eval = -Search(board, timer, plyRemaining - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
 
-            if (eval >= beta) return beta;
+            if (eval == positiveInfinity) return positiveInfinity;
+            if (eval >= beta) return beta; // *snip* :D
             if (eval > alpha)
             {
                 alpha = eval;
@@ -95,7 +89,7 @@ public class MyBot : IChessBot
     {
         int eval = Evaluate(board);
         if (eval >= beta) return beta;
-        alpha = (int)MathF.Max(alpha, eval);
+        alpha = Math.Max(alpha, eval);
 
         Move[] captureMoves = Order(board.GetLegalMoves(true), board, Move.NullMove);
         foreach (Move captureMove in captureMoves)
@@ -105,7 +99,7 @@ public class MyBot : IChessBot
             board.UndoMove(captureMove);
 
             if (eval >= beta) return beta;
-            alpha = (int)MathF.Max(alpha, eval);
+            alpha = Math.Max(alpha, eval);
         }
         return alpha;
     }
@@ -172,6 +166,13 @@ public class MyBot : IChessBot
         -30,-40,-40,-50,-50,-40,-40,-30,
         -30,-40,-40,-50,-50,-40,-40,-30,
     };
+
+    //Represent the rank scores as a 64-bit int. NEED TO FINISH
+    ulong[] king_mg_table_v2 = new ulong[]
+    {
+        0b0001010000011110000010100000000000000000000010100001111000010100L,
+        0b0001010000010100000000000000000000000000000000000001010000010100L,
+    };
     int[] king_eg_table = new int[]
     {
         -50,-30,-30,-30,-30,-30,-30,-50,
@@ -223,15 +224,15 @@ public class MyBot : IChessBot
 
         //Pawn Development
         int pawnDevelopment = 0;
-        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, board.IsWhiteToMove))
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, true))
         {
             pawnDevelopment += 50 - 15 * (7 - pawn.Square.Rank);
         }
-        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, !board.IsWhiteToMove))
+        foreach (Piece pawn in board.GetPieceList(PieceType.Pawn, false))
         {
-            pawnDevelopment -= 50 - 15 * (7 - pawn.Square.Rank);
+            pawnDevelopment -= 50 - 15 * (pawn.Square.Rank);
         }
-        pawnDevelopment = (int)(pawnDevelopment * progression);
+        pawnDevelopment = (int)(pawnDevelopment * progression * perspective);
 
 
         //Endgame Bonus
