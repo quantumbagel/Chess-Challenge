@@ -13,58 +13,65 @@ public class MyBot : IChessBot
         return bestMovesByDepth[0];
     }
 
-
+    // Can save a lot of tokens by hardcoding these values in
     const int immediateMateScore = 100000;
     const int positiveInfinity = 9999999;
     const int negativeInfinity = -positiveInfinity;
     const int maxSearchDepth = int.MaxValue;
     const int maxMillisecondsPerSearch = 1500;
 
-    List<Move> bestMovesByDepth;
-    int bestEval;
+    // Store timer and board references to simplify function signatures
+    private Timer timer;
+    private Board board;
 
+    List<Move> bestMovesByDepth;
     bool isSearchCancelled;
 
 
-    void StartSearch(Board board, Timer timer)
+    void StartSearch(Board _board, Timer _timer)
     {
+        board = _board;
+        timer = _timer;
+
         bestMovesByDepth = new List<Move>();
-        bestEval = 0;
         isSearchCancelled = false;
 
+        Console.WriteLine("---"); // debug
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
             bestMovesByDepth.Add(Move.NullMove);
-            Search(board, timer, searchDepth, 0, negativeInfinity, positiveInfinity);
+            Search(searchDepth, 0, negativeInfinity, positiveInfinity);
 
-            if (Math.Abs(bestEval) > immediateMateScore - 1000) break;
+            Console.WriteLine(searchDepth); // debug
         }
     }
 
-    int Search(Board board, Timer timer, int plyRemaining, int plyFromRoot, int alpha, int beta)
+    int Search(int depth, int plyFromRoot, int alpha, int beta)
     {
-        if (timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch) // Cancel the search if we are out of time
-        {
-            isSearchCancelled = true;
-            return 0;
-        }
+        // Cancel the search if we are out of time
+        isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
+        if (isSearchCancelled) return 0;
 
-        if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot; // Check for Checkmate before we do anything else.
+        // Check for Checkmate before we do anything else.
+        if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
 
 
         // Once we reach target depth, search all captures to make the evaluation more accurate
-        if (plyRemaining == 0) return QuiescenceSearch(board, alpha, beta);
+        if (depth == 0) return QuiescenceSearch(alpha, beta);
 
-        Move[] unorderedMoves = board.GetLegalMoves();
-        if (unorderedMoves.Length == 0) return 0; // Stalemate
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves);
+
+        // Stalemate Check
+        if (moves.Length == 0) return 0;
 
         // Order the moves, making sure to put the best move from the previous iteration first
-        Move[] orderedMoves = Order(unorderedMoves, board, bestMovesByDepth[plyFromRoot]);
+        Sort(ref moves, bestMovesByDepth[plyFromRoot]);
 
-        foreach (Move move in orderedMoves)
+        foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -Search(board, timer, plyRemaining - 1, plyFromRoot + 1, -beta, -alpha);
+            int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
 
             if (eval >= beta) return beta;
@@ -72,26 +79,28 @@ public class MyBot : IChessBot
             {
                 alpha = eval;
                 bestMovesByDepth[plyFromRoot] = move;
-                bestEval = plyFromRoot == 0 ? eval : bestEval;
+                if (plyFromRoot == 0 && Math.Abs(eval) > immediateMateScore - 1000) isSearchCancelled = true;
             }
         }
 
         return alpha;
     }
 
-    int QuiescenceSearch(Board board, int alpha, int beta)
+    int QuiescenceSearch(int alpha, int beta)
     {
-        int eval = Evaluate(board);
+        int eval = Evaluate();
         if (eval >= beta) return beta;
         alpha = Math.Max(alpha, eval);
 
         // Order the moves
-        Move[] orderedMoves = Order(board.GetLegalMoves(true), board, Move.NullMove);
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves, !board.IsInCheck());
+        Sort(ref moves, default);
 
-        foreach (Move move in orderedMoves)
+        foreach (Move move in moves)
         {
             board.MakeMove(move);
-            eval = -QuiescenceSearch(board, -beta, -alpha);
+            eval = -QuiescenceSearch(-beta, -alpha);
             board.UndoMove(move);
 
             if (eval >= beta) return beta;
@@ -101,32 +110,24 @@ public class MyBot : IChessBot
         return alpha;
     }
 
-    Move[] Order(Move[] moves, Board board, Move putThisFirst)
+    void Sort(ref Span<Move> moves, Move putThisFirst)
     {
-        if (moves.Length == 0) return new Move[0];
-        Move[] returnThis = new Move[moves.Length];
-
-        Dictionary<Move, int> orderedMoves = new Dictionary<Move, int>();
-        foreach (Move move in moves)
+        Span<int> sortKeys = stackalloc int[moves.Length];
+        for (int i = 0; i < moves.Length; i++)
         {
-            if (move.IsNull) continue;
-
-            int moveScoreGuess = 0;
-            if (move.IsCapture) moveScoreGuess += 10 * GetPointValue(move.CapturePieceType) - GetPointValue(move.MovePieceType);
-            if (move.IsPromotion) moveScoreGuess += GetPointValue(move.PromotionPieceType);
-            if (board.SquareIsAttackedByOpponent(move.TargetSquare)) moveScoreGuess -= GetPointValue(move.MovePieceType);
-            if (move == putThisFirst) moveScoreGuess += 100000;
-            orderedMoves.Add(move, moveScoreGuess);
+            Move move = moves[i];
+            sortKeys[i] = move switch
+            {
+                // 1. Priority Move
+                _ when move == putThisFirst => 0,
+                // 2. Promotion
+                { IsPromotion: true } => 1,
+                // 3. Captures
+                { IsCapture: true } => 1000 - 10 * (int)move.CapturePieceType + (int)move.MovePieceType,
+                _ => 1001
+            };
         }
-        int counter = 0;
-        foreach (var k in orderedMoves.OrderByDescending(x => x.Value))
-        {
-            returnThis[counter] = k.Key;
-            counter++;
-        }
-
-        return returnThis;
-
+        sortKeys.Sort(moves);
     }
 
 
@@ -154,31 +155,31 @@ public class MyBot : IChessBot
     // The position is assumed to be 'quiet', i.e no captures are available that could drastically affect the evaluation.
     // The score that's returned is given from the perspective of whoever's turn it is to move.
     // So a positive score means the player who's turn it is to move has an advantage, while a negative score indicates a disadvantage.
-    public int Evaluate(Board board)
+    public int Evaluate()
     {
         Square whiteKingSquare = board.GetKingSquare(true);
         Square blackKingSquare = board.GetKingSquare(false);
 
         //Mobility
-        int mobility = GetMobilityBonus(board);
+        int mobility = GetMobilityBonus();
         if (board.TrySkipTurn())
         {
-            mobility -= GetMobilityBonus(board);
+            mobility -= GetMobilityBonus();
             board.UndoSkipTurn();
         }
         else mobility = 0; // ignore mobility if we can't get it for both sides
 
 
-        return (CountMaterial(board, true) - CountMaterial(board, false)
-            + GetKingSafetyScores(whiteKingSquare.File, whiteKingSquare.Rank, EndgamePhaseWeight(board, true))
-            - GetKingSafetyScores(blackKingSquare.File, 7 - blackKingSquare.Rank, EndgamePhaseWeight(board, false))
-            + GetEndgameBonus(board, true)
-            - GetEndgameBonus(board, false)) 
-            * (board.IsWhiteToMove ? 1 : -1) 
+        return (CountMaterial(true) - CountMaterial(false)
+            + GetKingSafetyScores(whiteKingSquare.File, whiteKingSquare.Rank, EndgamePhaseWeight(true))
+            - GetKingSafetyScores(blackKingSquare.File, 7 - blackKingSquare.Rank, EndgamePhaseWeight(false))
+            + GetEndgameBonus(true)
+            - GetEndgameBonus(false))
+            * (board.IsWhiteToMove ? 1 : -1)
             + mobility;
     }
 
-    
+
     int[] POINT_VALUES = { 100, 350, 350, 525, 1000 };
     int GetPointValue(PieceType type)
     {
@@ -190,12 +191,12 @@ public class MyBot : IChessBot
         }
     }
 
-    float EndgamePhaseWeight(Board board, bool isWhite)
+    float EndgamePhaseWeight(bool isWhite)
     {
-        return 1 - Math.Min(1, (CountMaterial(board, isWhite) - board.GetPieceList(PieceType.Pawn, isWhite).Count * 100) / 1750);
+        return 1 - Math.Min(1, (CountMaterial(isWhite) - board.GetPieceList(PieceType.Pawn, isWhite).Count * 100) / 1750);
     }
 
-    int GetMobilityBonus(Board board)
+    int GetMobilityBonus()
     {
         int mobility = 0;
         foreach (Move move in board.GetLegalMoves())
@@ -222,11 +223,11 @@ public class MyBot : IChessBot
     int GetKingSafetyScores(int file, int relativeRank, float endgameWeight)
     {
         sbyte midgameScore = (sbyte)((kingMidgameTable[Math.Min(relativeRank, 4)] >> file * 8) % 256);
-        return (int)(midgameScore + (  midgameScore - (sbyte)( (kingEndgameTable[(int)Math.Abs(3.5 - relativeRank)] >> file * 8) % 256 )  ) * endgameWeight);
+        return (int)(midgameScore + (midgameScore - (sbyte)((kingEndgameTable[(int)Math.Abs(3.5 - relativeRank)] >> file * 8) % 256)) * endgameWeight);
     }
 
 
-    int CountMaterial(Board board, bool isWhite)
+    int CountMaterial(bool isWhite)
     {
         return board.GetPieceList(PieceType.Pawn, isWhite).Count * 100
             + board.GetPieceList(PieceType.Knight, isWhite).Count * 350
@@ -235,15 +236,16 @@ public class MyBot : IChessBot
             + board.GetPieceList(PieceType.Queen, isWhite).Count * 1000;
     }
 
-    int GetEndgameBonus(Board board, bool isWhite)
+    int GetEndgameBonus(bool isWhite)
     {
-        float enemyEndgameWeight = EndgamePhaseWeight(board, !isWhite);
+        float enemyEndgameWeight = EndgamePhaseWeight(!isWhite);
         if (enemyEndgameWeight <= 0) return 0;
         ulong ourBB = isWhite ? board.WhitePiecesBitboard : board.BlackPiecesBitboard;
         Square enemyKingSquare = board.GetKingSquare(!isWhite);
 
         int endgameBonus = 0;
-        while (ourBB != 0) {
+        while (ourBB != 0)
+        {
             Square pieceSquare = new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref ourBB));
             switch (board.GetPiece(pieceSquare).PieceType)
             {
