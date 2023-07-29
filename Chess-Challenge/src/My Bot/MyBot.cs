@@ -10,15 +10,18 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
+        // Debug to Help test data compression
         int[] testTable = { 1, 2, 3, 1 };
         decimal testCompressed = compressSByteArray(testTable);
         int[] testUncompressed = testUncompressPieceSquareTable(testCompressed);
         foreach (int item in testUncompressed) Console.WriteLine(item);
+
+
         StartSearch(board, timer);
         return bestMovesByDepth[0];
     }
 
-    // Can save a lot of tokens by hardcoding these values in
+    // Can save a lot of tokens (~21) by hardcoding these values in
     const int immediateMateScore = 100000;
     const int positiveInfinity = 9999999;
     const int negativeInfinity = -positiveInfinity;
