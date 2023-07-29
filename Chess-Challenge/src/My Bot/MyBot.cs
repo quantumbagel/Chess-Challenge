@@ -1,6 +1,7 @@
 ﻿using ChessChallenge.API;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using static System.Formats.Asn1.AsnWriter;
@@ -9,6 +10,10 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
+        int[] testTable = { 1, 2, 3, 1 };
+        decimal testCompressed = compressSByteArray(testTable);
+        int[] testUncompressed = testUncompressPieceSquareTable(testCompressed);
+        foreach (int item in testUncompressed) Console.WriteLine(item);
         StartSearch(board, timer);
         return bestMovesByDepth[0];
     }
@@ -17,7 +22,6 @@ public class MyBot : IChessBot
     const int immediateMateScore = 100000;
     const int positiveInfinity = 9999999;
     const int negativeInfinity = -positiveInfinity;
-    const int maxSearchDepth = int.MaxValue;
     const int maxMillisecondsPerSearch = 1500;
 
     // Store timer and board references to simplify function signatures
@@ -79,6 +83,10 @@ public class MyBot : IChessBot
             {
                 alpha = eval;
                 bestMovesByDepth[plyFromRoot] = move;
+
+                // Saved creation of a variable by moving the checkmate check to here.
+                // There is the possibility that this stops the search before the computer finds a quicker checkmate.
+                // Worth it to give up some tokens?
                 if (plyFromRoot == 0 && Math.Abs(eval) > immediateMateScore - 1000) isSearchCancelled = true;
             }
         }
@@ -134,7 +142,7 @@ public class MyBot : IChessBot
     #region Evalution
 
     //Represent the rank scores as a 64-bit int. Last couple rows are all copies
-    ulong[] kingMidgameTable = new ulong[]
+    static readonly ulong[] kingMidgameTable = new ulong[]
     {
         0b_00010100_00011110_00001010_00000000_00000000_00001010_00011110_00010100L,
         0b_00010100_00010100_00000000_00000000_00000000_00000000_00010100_00010100L,
@@ -143,13 +151,55 @@ public class MyBot : IChessBot
         0b_11100010_11011000_11011000_11001110_11001110_11011000_11011000_11100010L
     };
 
-    ulong[] kingEndgameTable = new ulong[]
+    readonly ulong[] kingEndgameTable = new ulong[]
     {
         0b_11100010_11110110_00011110_00101000_00101000_00011110_11110110_11100010L,
         0b_11100010_11110110_00010100_00011110_00011110_00010100_11110110_11100010L,
         0b_11100010_11100010_00000000_00000000_00000000_00000000_11100010_11100010L,
         0b_11001110_11100010_11100010_11100010_11100010_11100010_11100010_11001110L,
     };
+
+    #region HELPER FUNCTIONS FOR DATA COMPRESSION
+
+    private decimal compressSByteArray(int[] values)
+    {
+        decimal result = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            result += (sbyte)values[i] << 8 * i;
+        }
+        return result;
+    }
+
+    private int[] testUncompressPieceSquareTable(decimal compressed)
+    {
+        return decimal.GetBits(compressed).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
+    }
+
+    private int[] partialCompressPieceSquareTable(sbyte[] table)
+    {
+        Debug.Assert(table.Length == 64);
+        int[] result = new int[16];
+        for (int i = 0; i < 64; i++)
+        {
+            int arrayLoc = i / 4;
+            result[arrayLoc] += table[i] << 8 * i;
+        }
+        return result;
+    }
+
+    private decimal[] compressIntArrayToDecimals(int[] values)
+    {
+        Debug.Assert(values.Length % 3 == 0);
+        decimal[] result = new decimal[values.Length / 3];
+        for (int i = 0; i < values.Length; i += 3)
+        {
+            result[i / 3] = new decimal(new int[]{ values[i], values[i + 1], values[i + 2], 0 });
+        }
+        return result;
+    }
+
+    #endregion
 
     // Performs static evaluation of the current position.
     // The position is assumed to be 'quiet', i.e no captures are available that could drastically affect the evaluation.
