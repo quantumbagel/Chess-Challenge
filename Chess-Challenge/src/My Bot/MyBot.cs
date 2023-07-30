@@ -4,17 +4,18 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
-using static System.Formats.Asn1.AsnWriter;
 
 public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
         // Debug to Help test data compression
+        /*
         int[] testTable = { 1, 2, 3, 1 };
         decimal testCompressed = compressSByteArray(testTable);
         int[] testUncompressed = testUncompressPieceSquareTable(testCompressed);
         foreach (int item in testUncompressed) Console.WriteLine(item);
+        */
 
 
         StartSearch(board, timer);
@@ -32,6 +33,7 @@ public class MyBot : IChessBot
     private Board board;
 
     List<Move> bestMovesByDepth;
+    int bestEval;
     bool isSearchCancelled;
 
 
@@ -41,81 +43,67 @@ public class MyBot : IChessBot
         timer = _timer;
 
         bestMovesByDepth = new List<Move>();
+        bestEval = 0;
         isSearchCancelled = false;
 
         Console.WriteLine("---"); // debug
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
             bestMovesByDepth.Add(Move.NullMove);
-            Search(searchDepth, 0, negativeInfinity, positiveInfinity);
+            Search(searchDepth, 0, negativeInfinity, positiveInfinity, false);
 
             Console.WriteLine(searchDepth); // debug
+
+            if (Math.Abs(bestEval) > immediateMateScore - 1000) break;
         }
     }
 
-    int Search(int depth, int plyFromRoot, int alpha, int beta)
+    int Search(int depth, int plyFromRoot, int alpha, int beta, bool quiescence)
     {
-        // Cancel the search if we are out of time
-        isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
-        if (isSearchCancelled) return 0;
+        if (quiescence)
+        {
+            int score = Evaluate();
+            if (score >= beta) return beta; // *snip* :D
+            alpha = Math.Max(alpha, score);
+        }
+        else
+        {
+            // Cancel the search if we are out of time
+            isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
+            if (isSearchCancelled) return 0;
 
-        // Check for Checkmate before we do anything else.
-        if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
+            // Check for Checkmate before we do anything else.
+            if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
 
 
-        // Once we reach target depth, search all captures to make the evaluation more accurate
-        if (depth == 0) return QuiescenceSearch(alpha, beta);
-
+            // Once we reach target depth, search all captures to make the evaluation more accurate
+            if (depth == 0) return Search(depth, plyFromRoot, alpha, beta, true);
+        }
         Span<Move> moves = stackalloc Move[256];
-        board.GetLegalMovesNonAlloc(ref moves);
+        board.GetLegalMovesNonAlloc(ref moves, quiescence && !board.IsInCheck());
 
         // Stalemate Check
-        if (moves.Length == 0) return 0;
+        if (!quiescence && moves.Length == 0) return 0;
 
         // Order the moves, making sure to put the best move from the previous iteration first
-        Sort(ref moves, bestMovesByDepth[plyFromRoot]);
+        Sort(ref moves, quiescence ? default : bestMovesByDepth[plyFromRoot]);
 
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
+            int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha, quiescence);
             board.UndoMove(move);
 
-            if (eval >= beta) return beta;
+            if (eval >= beta) return beta; // *snip* :D
             if (eval > alpha)
             {
                 alpha = eval;
-                bestMovesByDepth[plyFromRoot] = move;
-
-                // Saved creation of a variable by moving the checkmate check to here.
-                // There is the possibility that this stops the search before the computer finds a quicker checkmate.
-                // Worth it to give up some tokens?
-                if (plyFromRoot == 0 && Math.Abs(eval) > immediateMateScore - 1000) isSearchCancelled = true;
+                if (!quiescence)
+                {
+                    bestMovesByDepth[plyFromRoot] = move;
+                    bestEval = plyFromRoot == 0 ? eval : bestEval;
+                }
             }
-        }
-
-        return alpha;
-    }
-
-    int QuiescenceSearch(int alpha, int beta)
-    {
-        int eval = Evaluate();
-        if (eval >= beta) return beta;
-        alpha = Math.Max(alpha, eval);
-
-        // Order the moves
-        Span<Move> moves = stackalloc Move[256];
-        board.GetLegalMovesNonAlloc(ref moves, !board.IsInCheck());
-        Sort(ref moves, default);
-
-        foreach (Move move in moves)
-        {
-            board.MakeMove(move);
-            eval = -QuiescenceSearch(-beta, -alpha);
-            board.UndoMove(move);
-
-            if (eval >= beta) return beta;
-            alpha = Math.Max(alpha, eval);
         }
 
         return alpha;
@@ -162,6 +150,7 @@ public class MyBot : IChessBot
         0b_11001110_11100010_11100010_11100010_11100010_11100010_11100010_11001110L,
     };
 
+    /*
     #region HELPER FUNCTIONS FOR DATA COMPRESSION
 
     private decimal compressSByteArray(int[] values)
@@ -203,6 +192,7 @@ public class MyBot : IChessBot
     }
 
     #endregion
+    */
 
     // Performs static evaluation of the current position.
     // The position is assumed to be 'quiet', i.e no captures are available that could drastically affect the evaluation.
@@ -213,7 +203,7 @@ public class MyBot : IChessBot
         Square whiteKingSquare = board.GetKingSquare(true);
         Square blackKingSquare = board.GetKingSquare(false);
 
-        //Mobility
+        //Mobility; Maybe try to move the mobility bonus to the search function since it already looks at all available moves.
         int mobility = GetMobilityBonus();
         if (board.TrySkipTurn())
         {
@@ -229,11 +219,11 @@ public class MyBot : IChessBot
             + GetEndgameBonus(true)
             - GetEndgameBonus(false))
             * (board.IsWhiteToMove ? 1 : -1)
-            + mobility;
+            + mobility + 10; // add 10 points for tempo
     }
 
 
-    int[] POINT_VALUES = { 100, 350, 350, 525, 1000 };
+    int[] POINT_VALUES = { 100, 350, 400, 525, 1000 };
     int GetPointValue(PieceType type)
     {
         switch (type)
@@ -284,7 +274,7 @@ public class MyBot : IChessBot
     {
         return board.GetPieceList(PieceType.Pawn, isWhite).Count * 100
             + board.GetPieceList(PieceType.Knight, isWhite).Count * 350
-            + board.GetPieceList(PieceType.Bishop, isWhite).Count * 350
+            + board.GetPieceList(PieceType.Bishop, isWhite).Count * 400
             + board.GetPieceList(PieceType.Rook, isWhite).Count * 525
             + board.GetPieceList(PieceType.Queen, isWhite).Count * 1000;
     }
