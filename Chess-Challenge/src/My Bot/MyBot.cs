@@ -233,7 +233,7 @@ public class MyBot : IChessBot
             + GetEndgameBonus(true)
             - GetEndgameBonus(false))
             * (board.IsWhiteToMove ? 1 : -1)
-            + mobility + 10; // add 10 points for tempo
+            + mobility + 10; // add 10 points for tempo. Makes the bot better, makes zero sense :D
     }
 
 
