@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
+using static System.Formats.Asn1.AsnWriter;
 
 public class MyBot : IChessBot
 {
@@ -50,7 +51,7 @@ public class MyBot : IChessBot
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
             bestMovesByDepth.Add(Move.NullMove);
-            Search(searchDepth, 0, negativeInfinity, positiveInfinity, false);
+            Search(searchDepth, 0, negativeInfinity, positiveInfinity);
 
             Console.WriteLine(searchDepth); // debug
 
@@ -58,52 +59,65 @@ public class MyBot : IChessBot
         }
     }
 
-    int Search(int depth, int plyFromRoot, int alpha, int beta, bool quiescence)
+    int Search(int depth, int plyFromRoot, int alpha, int beta)
     {
-        if (quiescence)
-        {
-            int score = Evaluate();
-            if (score >= beta) return beta; // *snip* :D
-            alpha = Math.Max(alpha, score);
-        }
-        else
-        {
-            // Cancel the search if we are out of time
-            isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
-            if (isSearchCancelled) return 0;
+        // Cancel the search if we are out of time
+        isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
+        if (isSearchCancelled) return 0;
 
-            // Check for Checkmate before we do anything else.
-            if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
+        // Check for Checkmate before we do anything else.
+        if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
 
 
-            // Once we reach target depth, search all captures to make the evaluation more accurate
-            if (depth == 0) return Search(depth, plyFromRoot, alpha, beta, true);
-        }
+        // Once we reach target depth, search all captures to make the evaluation more accurate
+        if (depth == 0) return QuiescenceSearch(alpha, beta);
+
         Span<Move> moves = stackalloc Move[256];
-        board.GetLegalMovesNonAlloc(ref moves, quiescence && !board.IsInCheck());
+        board.GetLegalMovesNonAlloc(ref moves);
 
         // Stalemate Check
-        if (!quiescence && moves.Length == 0) return 0;
+        if (moves.Length == 0) return 0;
 
         // Order the moves, making sure to put the best move from the previous iteration first
-        Sort(ref moves, quiescence ? default : bestMovesByDepth[plyFromRoot]);
+        Sort(ref moves, bestMovesByDepth[plyFromRoot]);
 
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha, quiescence);
+            int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
 
             if (eval >= beta) return beta; // *snip* :D
             if (eval > alpha)
             {
                 alpha = eval;
-                if (!quiescence)
-                {
-                    bestMovesByDepth[plyFromRoot] = move;
-                    bestEval = plyFromRoot == 0 ? eval : bestEval;
-                }
+                bestMovesByDepth[plyFromRoot] = move;
+                bestEval = plyFromRoot == 0 ? eval : bestEval;
             }
+        }
+
+        return alpha;
+    }
+
+    int QuiescenceSearch(int alpha, int beta)
+    {
+        int eval = Evaluate();
+        if (eval >= beta) return beta; // *snip* :D
+        alpha = Math.Max(alpha, eval);
+
+        // Order the moves
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves, !board.IsInCheck());
+        Sort(ref moves, default);
+
+        foreach (Move move in moves)
+        {
+            board.MakeMove(move);
+            eval = -QuiescenceSearch(-beta, -alpha);
+            board.UndoMove(move);
+
+            if (eval >= beta) return beta; // *snip* :D
+            alpha = Math.Max(alpha, eval);
         }
 
         return alpha;
