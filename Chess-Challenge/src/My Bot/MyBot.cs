@@ -10,24 +10,9 @@ public class MyBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        // Debug to Help test data compression
-        /*
-        int[] testTable = { 1, 2, 3, 1 };
-        decimal testCompressed = compressSByteArray(testTable);
-        int[] testUncompressed = testUncompressPieceSquareTable(testCompressed);
-        foreach (int item in testUncompressed) Console.WriteLine(item);
-        */
-
-
         StartSearch(board, timer);
         return bestMovesByDepth[0];
     }
-
-    // Can save a lot of tokens (~21) by hardcoding these values in
-    const int immediateMateScore = 100000;
-    const int positiveInfinity = 9999999;
-    const int negativeInfinity = -positiveInfinity;
-    const int maxMillisecondsPerSearch = 1500;
 
     // Store timer and board references to simplify function signatures
     private Timer timer;
@@ -47,26 +32,25 @@ public class MyBot : IChessBot
         bestEval = 0;
         isSearchCancelled = false;
 
-        Console.WriteLine("---"); // debug
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
-            bestMovesByDepth.Add(Move.NullMove);
-            Search(searchDepth, 0, negativeInfinity, positiveInfinity);
+            bestMovesByDepth.Add(default);
+            // Use really large values to guarantee initial sets
+            Search(searchDepth, 0, -9999999, 9999999);
 
-            Console.WriteLine(searchDepth); // debug
-
-            if (Math.Abs(bestEval) > immediateMateScore - 1000) break;
+            // Checkmate has been found
+            if (Math.Abs(bestEval) > 99000) break;
         }
     }
 
     int Search(int depth, int plyFromRoot, int alpha, int beta)
     {
-        // Cancel the search if we are out of time
-        isSearchCancelled = timer.MillisecondsElapsedThisTurn > maxMillisecondsPerSearch;
-        if (isSearchCancelled) return 0;
+        // Cancel the search if we are out of time.
+        isSearchCancelled = timer.MillisecondsElapsedThisTurn > 1500;
+        if (isSearchCancelled || board.IsRepeatedPosition()) return 0;
 
         // Check for Checkmate before we do anything else.
-        if (board.IsInCheckmate()) return -immediateMateScore + plyFromRoot;
+        if (board.IsInCheckmate()) return -100000 + plyFromRoot;
 
 
         // Once we reach target depth, search all captures to make the evaluation more accurate
@@ -146,6 +130,31 @@ public class MyBot : IChessBot
 
     #region Evalution
 
+    /*
+    sbyte[] kingMidgameTableSBytes = new sbyte[]
+    {
+        20, 30, 10, 0, 0, 10, 30, 20,
+        20, 20, 0, 0, 0, 0, 20, 20,
+        -10, -20, -20, -20, -20, -20, -20, -10,
+        -20, -30, -30, -40, -40, -30, -30, -20,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+    };
+
+    sbyte[] kingEndgameTableSBytes = new sbyte[]
+    {
+        -50, -30, -30, -30, -30, -30, -30, -50,
+        -30, -30, 0, 0, 0, 0, -30, -30,
+        -30, -10, 20, 30, 30, 20, -10, -30,
+        -30, -10, 30, 40, 40, 30, -10, -30,
+        -30, -10, 30, 40, 40, 30, -10, -30,
+        -30, -10, 20, 30, 30, 20, -10, -30,
+        -30, -30, 0, 0, 0, 0, -30, -30,
+        -50, -30, -30, -30, -30, -30, -30, -50,
+    };
+
     //Represent the rank scores as a 64-bit int. Last couple rows are all copies
     static readonly ulong[] kingMidgameTable = new ulong[]
     {
@@ -156,13 +165,23 @@ public class MyBot : IChessBot
         0b_11100010_11011000_11011000_11001110_11001110_11011000_11011000_11100010L
     };
 
-    readonly ulong[] kingEndgameTable = new ulong[]
+    static readonly ulong[] kingEndgameTable = new ulong[]
     {
         0b_11100010_11110110_00011110_00101000_00101000_00011110_11110110_11100010L,
         0b_11100010_11110110_00010100_00011110_00011110_00010100_11110110_11100010L,
         0b_11100010_11100010_00000000_00000000_00000000_00000000_11100010_11100010L,
         0b_11001110_11100010_11100010_11100010_11100010_11100010_11100010_11001110L,
     };
+    */
+
+    static readonly decimal[] compressedKingSquareTables = new decimal[]
+    {
+        94817714145992272125460m, 76419737758473778852349083648m, 64016064217427759519433417452m, 70205764042755225896833571022m,
+        64016064216704357791052650722m, 64028200698568158524470778062m, 9309894698500220833627169506m, 70241150383004452811665970206m,
+        9309894698505883490981967586m, 70216829454857141189382378526m, 14907727180646769358m,
+    };
+
+    static readonly int[] kingSquareTables = compressedKingSquareTables.SelectMany(decimal.GetBits).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
 
     /*
     #region HELPER FUNCTIONS FOR DATA COMPRESSION
@@ -177,9 +196,9 @@ public class MyBot : IChessBot
         return result;
     }
 
-    private int[] testUncompressPieceSquareTable(decimal compressed)
+    private int[] testUncompressPieceSquareTable(decimal[] compressed)
     {
-        return decimal.GetBits(compressed).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
+        return compressed.SelectMany(decimal.GetBits).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
     }
 
     private int[] partialCompressPieceSquareTable(sbyte[] table)
@@ -189,24 +208,33 @@ public class MyBot : IChessBot
         for (int i = 0; i < 64; i++)
         {
             int arrayLoc = i / 4;
-            result[arrayLoc] += table[i] << 8 * i;
+            result[arrayLoc] += (byte)table[i] << 8 * i;
         }
         return result;
     }
 
     private decimal[] compressIntArrayToDecimals(int[] values)
     {
-        Debug.Assert(values.Length % 3 == 0);
-        decimal[] result = new decimal[values.Length / 3];
-        for (int i = 0; i < values.Length; i += 3)
+        int resultLength = (int)Math.Ceiling(values.Length / 3.0);
+        decimal[] result = new decimal[resultLength];
+        int[] constructor = new int[4];
+        for (int i = 0; i < values.Length; i++)
         {
-            result[i / 3] = new decimal(new int[]{ values[i], values[i + 1], values[i + 2], 0 });
+            constructor[i % 3] = values[i];
+            if (i % 3 == 2)
+            {
+                result[i / 3] = new decimal(constructor);
+                constructor = new int[4];
+            }
         }
+        // Fill last decimal if there is any data left over.
+        if (values.Length % 3 != 0) result[resultLength - 1] = new decimal(constructor);
+
         return result;
     }
 
     #endregion
-    */
+    //*/
 
     // Performs static evaluation of the current position.
     // The position is assumed to be 'quiet', i.e no captures are available that could drastically affect the evaluation.
@@ -214,9 +242,6 @@ public class MyBot : IChessBot
     // So a positive score means the player who's turn it is to move has an advantage, while a negative score indicates a disadvantage.
     public int Evaluate()
     {
-        Square whiteKingSquare = board.GetKingSquare(true);
-        Square blackKingSquare = board.GetKingSquare(false);
-
         //Mobility; Maybe try to move the mobility bonus to the search function since it already looks at all available moves.
         int mobility = GetMobilityBonus();
         if (board.TrySkipTurn())
@@ -226,10 +251,9 @@ public class MyBot : IChessBot
         }
         else mobility = 0; // ignore mobility if we can't get it for both sides
 
-
         return (CountMaterial(true) - CountMaterial(false)
-            + GetKingSafetyScores(whiteKingSquare.File, whiteKingSquare.Rank, EndgamePhaseWeight(true))
-            - GetKingSafetyScores(blackKingSquare.File, 7 - blackKingSquare.Rank, EndgamePhaseWeight(false))
+            + GetKingSafetyScores(board.GetKingSquare(true).Index, EndgamePhaseWeight(true))
+            - GetKingSafetyScores(board.GetKingSquare(false).Index ^ 56, EndgamePhaseWeight(false)) // Bitwise XOR-ing with 56 flips the board perspective
             + GetEndgameBonus(true)
             - GetEndgameBonus(false))
             * (board.IsWhiteToMove ? 1 : -1)
@@ -243,7 +267,7 @@ public class MyBot : IChessBot
         switch (type)
         {
             case PieceType.None: return 0;
-            case PieceType.King: return positiveInfinity;
+            case PieceType.King: return 9999999;
             default: return POINT_VALUES[(int)type - 1];
         }
     }
@@ -277,11 +301,18 @@ public class MyBot : IChessBot
         return mobility;
     }
 
-    int GetKingSafetyScores(int file, int relativeRank, float endgameWeight)
+    int GetKingSafetyScores(int index, float endgameWeight)
+    {
+        return (int)(kingSquareTables[index] + (kingSquareTables[index + 64] - kingSquareTables[index]) * endgameWeight);
+    }
+
+    /*
+    int GetKingSafetyScoresOld(int file, int relativeRank, float endgameWeight)
     {
         sbyte midgameScore = (sbyte)((kingMidgameTable[Math.Min(relativeRank, 4)] >> file * 8) % 256);
-        return (int)(midgameScore + (midgameScore - (sbyte)((kingEndgameTable[(int)Math.Abs(3.5 - relativeRank)] >> file * 8) % 256)) * endgameWeight);
+        return (int)(midgameScore + ((sbyte)((kingEndgameTable[(int)Math.Abs(3.5 - relativeRank)] >> file * 8) % 256) - midgameScore) * endgameWeight);
     }
+    */
 
 
     int CountMaterial(bool isWhite)
@@ -316,8 +347,8 @@ public class MyBot : IChessBot
                     break;
                 default:
                     // In general, we want to get our pieces closer to the enemy king, will give us a better chance of finding a checkmate.
-                    // Use power growth so we prioritive
-                    endgameBonus += 50 - (int)(10 * Math.Pow(Math.Max(Math.Abs(enemyKingSquare.File - pieceSquare.File), Math.Abs(enemyKingSquare.Rank - pieceSquare.Rank)), 1.5));
+                    // Use power growth so we prioritice moving further pieces closer
+                    endgameBonus += 50 - 10 * Math.Max(Math.Abs(enemyKingSquare.File - pieceSquare.File), Math.Abs(enemyKingSquare.Rank - pieceSquare.Rank));
                     break;
             }
         }
