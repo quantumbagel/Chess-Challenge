@@ -207,12 +207,12 @@ namespace ChessChallenge.Application
         {
             return type switch
             {
-                PlayerType.MyBot => new ChessPlayer(new MyBot(), type, GameDurationMilliseconds),
-                PlayerType.EvilBot => new ChessPlayer(new AlphaBetaV41(), type, GameDurationMilliseconds),
+                PlayerType.MyBot => new ChessPlayer(new skoolin(), type, GameDurationMilliseconds),
+                PlayerType.EvilBot => new ChessPlayer(new MyBot(), type, GameDurationMilliseconds),
                 _ => new ChessPlayer(new HumanPlayer(boardUI), type)
             };
         }
-
+        
         static int GetTokenCount()
         {
             string path = Path.Combine(Directory.GetCurrentDirectory(), "src", "My Bot", "MyBot.cs");

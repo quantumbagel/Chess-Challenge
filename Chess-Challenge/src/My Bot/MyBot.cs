@@ -18,7 +18,7 @@ public class MyBot : IChessBot
     private Timer timer;
     private Board board;
 
-    List<Move> bestMovesByDepth;
+    Move[] bestMovesByDepth;
     int bestEval;
     bool isSearchCancelled;
 
@@ -28,13 +28,12 @@ public class MyBot : IChessBot
         board = _board;
         timer = _timer;
 
-        bestMovesByDepth = new List<Move>();
+        bestMovesByDepth = new Move[256];
         bestEval = 0;
         isSearchCancelled = false;
 
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
-            bestMovesByDepth.Add(default);
             // Use really large values to guarantee initial sets
             Search(searchDepth, 0, -9999999, 9999999);
 
@@ -46,15 +45,20 @@ public class MyBot : IChessBot
     int Search(int depth, int plyFromRoot, int alpha, int beta)
     {
         // Cancel the search if we are out of time.
-        isSearchCancelled = timer.MillisecondsElapsedThisTurn > 1500;
+        isSearchCancelled = 30 * timer.MillisecondsElapsedThisTurn > timer.MillisecondsRemaining;
         if (isSearchCancelled || board.IsRepeatedPosition()) return 0;
 
         // Check for Checkmate before we do anything else.
         if (board.IsInCheckmate()) return -100000 + plyFromRoot;
 
 
-        // Once we reach target depth, search all captures to make the evaluation more accurate
-        if (depth == 0) return QuiescenceSearch(alpha, beta);
+        // Once we reach target depth, search only captures to make the evaluation more accurate
+        // Also if we're in check, add to depth so we make sure we don't screw ourselves
+        if (depth == 0) 
+        {
+            if (board.IsInCheck()) depth++;
+            else return QuiescenceSearch(alpha, beta); 
+        }
 
         Span<Move> moves = stackalloc Move[256];
         board.GetLegalMovesNonAlloc(ref moves);
@@ -68,6 +72,7 @@ public class MyBot : IChessBot
         foreach (Move move in moves)
         {
             board.MakeMove(move);
+            // extend if we put the king in check
             int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
 
@@ -121,7 +126,8 @@ public class MyBot : IChessBot
                 { IsPromotion: true } => 1,
                 // 3. Captures
                 { IsCapture: true } => 1000 - 10 * (int)move.CapturePieceType + (int)move.MovePieceType,
-                _ => 1001
+                // 4. Prioritize moves with deep beta cutoffs; TODO
+                _ => 100_000_000
             };
         }
         sortKeys.Sort(moves);
@@ -260,18 +266,6 @@ public class MyBot : IChessBot
             + mobility + 10; // add 10 points for tempo. Makes the bot better, makes zero sense :D
     }
 
-
-    int[] POINT_VALUES = { 100, 350, 400, 525, 1000 };
-    int GetPointValue(PieceType type)
-    {
-        switch (type)
-        {
-            case PieceType.None: return 0;
-            case PieceType.King: return 9999999;
-            default: return POINT_VALUES[(int)type - 1];
-        }
-    }
-
     float EndgamePhaseWeight(bool isWhite)
     {
         return 1 - Math.Min(1, (CountMaterial(isWhite) - board.GetPieceList(PieceType.Pawn, isWhite).Count * 100) / 1750);
@@ -279,26 +273,26 @@ public class MyBot : IChessBot
 
     int GetMobilityBonus()
     {
-        int mobility = 0;
+        double mobility = 0;
         foreach (Move move in board.GetLegalMoves())
         {
             switch (move.MovePieceType)
             {
                 case PieceType.Knight:
-                    mobility += 100; // More points for knight since it has a smaller maximum of possible moves
+                    mobility += 10.5; // More points for knight since it has a smaller maximum of possible moves
                     break;
                 case PieceType.Bishop:
-                    mobility += 5;
+                    mobility += 2.5;
                     break;
                 case PieceType.Rook:
-                    mobility += 6;
+                    mobility += 3;
                     break;
                 case PieceType.Queen:
-                    mobility += 4;
+                    mobility += 2;
                     break;
             }
         }
-        return mobility;
+        return (int)mobility;
     }
 
     int GetKingSafetyScores(int index, float endgameWeight)
