@@ -1,10 +1,6 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Linq;
-using static System.Formats.Asn1.AsnWriter;
 
 public class MyBot : IChessBot
 {
