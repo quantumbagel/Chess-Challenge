@@ -1,34 +1,14 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Diagnostics;
 using System.Linq;
 
-public class MyBot : IChessBot
+public class AlphaBetaV4_2 : IChessBot
 {
-
-    // Piece-Square Tables compressed int 
-    static readonly decimal[] pieceSquareTablesCompressed = new decimal[]
+    public Move Think(Board board, Timer timer)
     {
-        73050598891932131575795286016m, 1852027132054302042446498540m, 7749238207795907812875304960m, 3107034359308944942007912985m,
-        3617008641903833650m, 64016111440372001233801576448m, 4654392201943765757458443480m, 69943683425501485030533564943m,
-        4654368590766923187343001058m, 67134068614839847746032110095m, 76431874238167385442330269902m, 76139357045148966610265372406m,
-        3106943912037633032876329718m, 76139380842170805011001379338m, 4555625215806555881718m, 73337024327312145536499318784m,
-        4630132762522656178176m, 77680737465157613332167917568m, 4648219218604617367803m, 77680737465157613332167917568m,
-        363113758191127045m, 73337024419906153871109521408m, 1553497845662423103603802358m, 77680761169585442315894260997m,
-        1553474234190302244684235003m, 76133312416050887966985291013m, 12231315200620454640809708m, 6213878712819216034459159040m,
-        67123050982693027703474154742m, 70205764042755225897002001112m, 64016064216704357791052650722m, 70205764042755225896833571022m,
-        3106986764541866412542525440m, 3106986765265268140923292170m, 9320960295072402694389109780m, 12427947061061072563524738590m,
-        3617008641903833650m, 64016111440372001233801576448m, 4654392201943765757458443480m, 69943683425501485030533564943m,
-        4654368590766923187343001058m, 67134068614839847746032110095m, 76431874238167385442330269902m, 76139357045148966610265372406m,
-        3106943912037633032876329718m, 76139380842170805011001379338m, 4555625215806555881718m, 73337024327312145536499318784m,
-        4630132762522656178176m, 77680737465157613332167917568m, 4648219218604617367803m, 77680737465157613332167917568m,
-        363113758191127045m, 73337024419906153871109521408m, 1553497845662423103603802358m, 77680761169585442315894260997m,
-        1553474234190302244684235003m, 76133312416050887966985291013m, 70217900526786406048616347372m, 70216829454857141189045576418m,
-        12416834054915469431742461666m, 70241150383004452811665972776m, 1071440143570414605760226m, 64028200698568158524471377920m,
-    };
-
-    static readonly int[] pieceSquareTables = pieceSquareTablesCompressed.SelectMany(decimal.GetBits).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
-
+        StartSearch(board, timer);
+        return bestMovesByDepth[0];
+    }
 
     // Store timer and board references to simplify function signatures
     private Timer timer;
@@ -38,12 +18,6 @@ public class MyBot : IChessBot
     int bestEval;
     bool isSearchCancelled;
 
-
-    public Move Think(Board board, Timer timer)
-    {
-        StartSearch(board, timer);
-        return bestMovesByDepth[0];
-    }
 
     void StartSearch(Board _board, Timer _timer)
     {
@@ -59,8 +33,6 @@ public class MyBot : IChessBot
             // Use really large values to guarantee initial sets
             Search(searchDepth, 0, -9999999, 9999999);
 
-            Console.WriteLine($"completed depth: {searchDepth}");
-
             // Checkmate has been found
             if (Math.Abs(bestEval) > 99000) break;
         }
@@ -73,15 +45,15 @@ public class MyBot : IChessBot
         if (isSearchCancelled || board.IsRepeatedPosition()) return 0;
 
         // Check for Checkmate before we do anything else.
-        if (board.IsInCheckmate() || board.IsInsufficientMaterial()) return -100000 + plyFromRoot;
+        if (board.IsInCheckmate()) return -100000 + plyFromRoot;
 
 
         // Once we reach target depth, search only captures to make the evaluation more accurate
         // Also if we're in check, add to depth so we make sure we don't screw ourselves
-        if (depth == 0) 
+        if (depth == 0)
         {
             if (board.IsInCheck()) depth++;
-            else return QuiescenceSearch(alpha, beta); 
+            else return QuiescenceSearch(alpha, beta);
         }
 
         Span<Move> moves = stackalloc Move[256];
@@ -160,80 +132,7 @@ public class MyBot : IChessBot
 
     #region Evalution
 
-    /* Old Tables
-    
-    sbyte[] pawnMidgameTableSBytes = new sbyte[]
-    {
-         0,  0,   0,   0,   0,   0,  0,  0,
-         5, 10,  10, -20, -20,  10, 10,  5,
-         5,  -5, -10,   0,   0, -10, -5,  5,
-         0,  0,   0,  20,  20,   0,  0,  0,
-         5,  5,  10,  25,  25,  10,  5,  5,
-        10, 10,  20,  30,  30,  20, 10, 10,
-        50, 50,  50,  50,  50,  50, 50, 50,
-         0,  0,   0,   0,   0,   0,  0,  0,
-    };
-
-    sbyte[] pawnEndgameTableSBytes = new sbyte[]
-    {
-         0,  0,  0,  0,  0,  0,  0,  0,
-        10, 10, 10, 10, 10, 10, 10, 10,
-        10, 10, 10, 10, 10, 10, 10, 10,
-        20, 20, 20, 20, 20, 20, 20, 20,
-        30, 30, 30, 30, 30, 30, 30, 30,
-        40, 40, 40, 40, 40, 40, 40, 40,
-        50, 50, 50, 50, 50, 50, 50, 50,
-         0,  0,  0,  0,  0,  0,  0,  0,
-    };
-
-    sbyte[] knightSquareTableSBytes = new sbyte[]
-    {
-        -50,-40,-30,-30,-30,-30,-40,-50,
-        -40,-20,  0,  5,  5,  0,-20,-40,
-        -30,  5, 10, 15, 15, 10,  5,-30,
-        -30,  0, 15, 20, 20, 15,  0,-30,
-        -30,  5, 15, 20, 20, 15,  5,-30,
-        -30,  0, 10, 15, 15, 10,  0,-30,
-        -40,-20,  0,  0,  0,  0,-20,-40,
-        -50,-40,-30,-30,-30,-30,-40,-50,
-    };
-
-    sbyte[] bishopSquareTableSBytes = new sbyte[]
-    {
-        -20,-10,-10,-10,-10,-10,-10,-20,
-        -10,  5,  0,  0,  0,  0,  5,-10,
-        -10, 10, 10, 10, 10, 10, 10,-10,
-        -10,  0, 10, 10, 10, 10,  0,-10,
-        -10,  5,  5, 10, 10,  5,  5,-10,
-        -10,  0,  5, 10, 10,  5,  0,-10,
-        -10,  0,  0,  0,  0,  0,  0,-10,
-        -20,-10,-10,-10,-10,-10,-10,-20,
-    };
-
-    sbyte[] rookSquareTableSBytes = new sbyte[]
-    {
-         0,  0,  0,  5,  5,  0,  0,  0,
-        -5,  0,  0,  0,  0,  0,  0, -5,
-        -5,  0,  0,  0,  0,  0,  0, -5,
-        -5,  0,  0,  0,  0,  0,  0, -5,
-        -5,  0,  0,  0,  0,  0,  0, -5,
-        -5,  0,  0,  0,  0,  0,  0, -5,
-         5, 10, 10, 10, 10, 10, 10,  5,
-         0,  0,  0,  0,  0,  0,  0,  0,
-    };
-
-    sbyte[] queenSquareTableSBytes = new sbyte[]
-    {
-        -20,-10,-10, -5, -5,-10,-10,-20,
-        -10,  0,  5,  0,  0,  0,  0,-10,
-        -10,  5,  5,  5,  5,  5,  0,-10,
-          0,  0,  5,  5,  5,  5,  0, -5,
-         -5,  0,  5,  5,  5,  5,  0, -5,
-        -10,  0,  5,  5,  5,  5,  0,-10,
-        -10,  0,  0,  0,  0,  0,  0,-10,
-        -20,-10,-10, -5, -5,-10,-10,-20,
-    };
-
+    /*
     sbyte[] kingMidgameTableSBytes = new sbyte[]
     {
         20, 30, 10, 0, 0, 10, 30, 20,
@@ -275,16 +174,19 @@ public class MyBot : IChessBot
         0b_11100010_11100010_00000000_00000000_00000000_00000000_11100010_11100010L,
         0b_11001110_11100010_11100010_11100010_11100010_11100010_11100010_11001110L,
     };
+    */
 
     static readonly decimal[] compressedKingSquareTables = new decimal[]
     {
-        94817714145992272125460m,       76419737758473778852349083648m, 64016064217427759519433417452m, 70205764042755225896833571022m,
-        64016064216704357791052650722m, 64028200698568158524470778062m, 9309894698500220833627169506m,  70241150383004452811665970206m,
-        9309894698505883490981967586m,  70216829454857141189382378526m, 14907727180646769358m,
+        94817714145992272125460m, 76419737758473778852349083648m, 64016064217427759519433417452m, 70205764042755225896833571022m,
+        64016064216704357791052650722m, 64028200698568158524470778062m, 9309894698500220833627169506m, 70241150383004452811665970206m,
+        9309894698505883490981967586m, 70216829454857141189382378526m, 14907727180646769358m,
     };
-    //*/
 
-    /* HELPER FUNCTIONS FOR DATA COMPRESSION
+    static readonly int[] kingSquareTables = compressedKingSquareTables.SelectMany(decimal.GetBits).Where((_, i) => i % 4 != 3).SelectMany(BitConverter.GetBytes).Select(t => (int)(sbyte)t).ToArray();
+
+    /*
+    #region HELPER FUNCTIONS FOR DATA COMPRESSION
 
     private decimal compressSByteArray(int[] values)
     {
@@ -333,6 +235,7 @@ public class MyBot : IChessBot
         return result;
     }
 
+    #endregion
     //*/
 
     // Performs static evaluation of the current position.
@@ -341,53 +244,65 @@ public class MyBot : IChessBot
     // So a positive score means the player who's turn it is to move has an advantage, while a negative score indicates a disadvantage.
     public int Evaluate()
     {
-        int mgScore = 0, egScore = 0, material = 0, phase = 0;
-
-        // Loop through white and black pieces (1 for white, -1 for black)
-        foreach (var sign in new[] { 1, -1 })
+        //Mobility; Maybe try to move the mobility bonus to the search function since it already looks at all available moves.
+        int mobility = GetMobilityBonus();
+        if (board.TrySkipTurn())
         {
-            Square enemyKingSquare = board.GetKingSquare(sign is -1);
-            for (var piece = 0; piece < 6; piece++)
-            {
-                ulong bitboard = board.GetPieceBitboard((PieceType)piece + 1, sign is 1);
-                while (bitboard != 0)
-                {
-                    int pieceIndex = BitboardHelper.ClearAndGetIndexOfLSB(ref bitboard);
-                    int tableIndex = piece * 64                                // table start index
-                        + ( pieceIndex                                         // square index in the table
-                        ^ (sign is -1 ? 56 : 0));                              // flip board for white pieces
-
-                    mgScore += sign * pieceSquareTables[tableIndex];
-                    egScore += sign * pieceSquareTables[tableIndex + 384];
-                    phase += 0b_0100_0010_0001_0001_0000 >> 4 * piece & 0xF;
-                    material += sign * (int)(0b_1111101000_1000001101_0110010000_0101011110_0001100100L >> 10 * piece & 0x3FF);
-
-                    /*
-                    // In the endgame, get the rooks closer to the enemy king's rank/file
-                    if (piece is 4) egScore += 50 - 10 * Math.Min(Math.Abs(enemyKingSquare.File - (pieceIndex % 8)), Math.Abs(enemyKingSquare.Rank - (pieceIndex / 8)));
-                    // For other pieces, just get closer in general.
-                    else egScore += 50 - 10 * Math.Max(Math.Abs(enemyKingSquare.File - (pieceIndex % 8)), Math.Abs(enemyKingSquare.Rank - (pieceIndex / 8)));
-                    //*/
-                }
-            }
+            mobility -= GetMobilityBonus();
+            board.UndoSkipTurn();
         }
+        else mobility = 0; // ignore mobility if we can't get it for both sides
 
-        int eval = material + (mgScore * phase + egScore * (24 - phase)) / 24;
-        // Tempo bonus for the current side to move
-        return 10 + (board.IsWhiteToMove ? eval : -eval);
+        return (CountMaterial(true) - CountMaterial(false)
+            + GetKingSafetyScores(board.GetKingSquare(true).Index, EndgamePhaseWeight(true))
+            - GetKingSafetyScores(board.GetKingSquare(false).Index ^ 56, EndgamePhaseWeight(false)) // Bitwise XOR-ing with 56 flips the board perspective
+            + GetEndgameBonus(true)
+            - GetEndgameBonus(false))
+            * (board.IsWhiteToMove ? 1 : -1)
+            + mobility + 10; // add 10 points for tempo. Makes the bot better, makes zero sense :D
     }
 
-    /* Old Eval Helpers
     float EndgamePhaseWeight(bool isWhite)
     {
         return 1 - Math.Min(1, (CountMaterial(isWhite) - board.GetPieceList(PieceType.Pawn, isWhite).Count * 100) / 1750);
     }
 
+    int GetMobilityBonus()
+    {
+        double mobility = 0;
+        foreach (Move move in board.GetLegalMoves())
+        {
+            switch (move.MovePieceType)
+            {
+                case PieceType.Knight:
+                    mobility += 10.5; // More points for knight since it has a smaller maximum of possible moves
+                    break;
+                case PieceType.Bishop:
+                    mobility += 2.5;
+                    break;
+                case PieceType.Rook:
+                    mobility += 3;
+                    break;
+                case PieceType.Queen:
+                    mobility += 2;
+                    break;
+            }
+        }
+        return (int)mobility;
+    }
+
+    int GetKingSafetyScores(int index, float endgameWeight)
+    {
+        return (int)(kingSquareTables[index] + (kingSquareTables[index + 64] - kingSquareTables[index]) * endgameWeight);
+    }
+
+    /*
     int GetKingSafetyScoresOld(int file, int relativeRank, float endgameWeight)
     {
         sbyte midgameScore = (sbyte)((kingMidgameTable[Math.Min(relativeRank, 4)] >> file * 8) % 256);
         return (int)(midgameScore + ((sbyte)((kingEndgameTable[(int)Math.Abs(3.5 - relativeRank)] >> file * 8) % 256) - midgameScore) * endgameWeight);
     }
+    */
 
 
     int CountMaterial(bool isWhite)
@@ -422,6 +337,7 @@ public class MyBot : IChessBot
                     break;
                 default:
                     // In general, we want to get our pieces closer to the enemy king, will give us a better chance of finding a checkmate.
+                    // Use power growth so we prioritice moving further pieces closer
                     endgameBonus += 50 - 10 * Math.Max(Math.Abs(enemyKingSquare.File - pieceSquare.File), Math.Abs(enemyKingSquare.Rank - pieceSquare.Rank));
                     break;
             }
@@ -429,7 +345,6 @@ public class MyBot : IChessBot
 
         return (int)(endgameBonus * enemyEndgameWeight);
     }
-    //*/
 
     #endregion
 }

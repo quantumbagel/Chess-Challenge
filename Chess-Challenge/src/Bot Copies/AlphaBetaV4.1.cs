@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 
-public class AlphaBetaV41 : IChessBot
+public class AlphaBetaV4_1 : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
