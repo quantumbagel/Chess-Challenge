@@ -1,5 +1,6 @@
 ﻿using ChessChallenge.API;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 
@@ -35,6 +36,7 @@ public class MyBot : IChessBot
     private Board board;
 
     Move[] bestMovesByDepth;
+    HashSet<Move>[] killerMoves;
     int bestEval;
     bool isSearchCancelled;
 
@@ -54,6 +56,12 @@ public class MyBot : IChessBot
         bestEval = 0;
         isSearchCancelled = false;
 
+        killerMoves = new HashSet<Move>[256];
+        for (int i = 0; i < 256; i++)
+        {
+            killerMoves[i] = new HashSet<Move>();
+        }
+
         for (int searchDepth = 1; !isSearchCancelled; searchDepth++)
         {
             // Use really large values to guarantee initial sets
@@ -61,7 +69,7 @@ public class MyBot : IChessBot
 
             Console.WriteLine($"completed depth: {searchDepth}");
 
-            // Checkmate has been found
+            // Checkmate has been found; Hardcoded checkmate score to save tokens
             if (Math.Abs(bestEval) > 99000) break;
         }
     }
@@ -100,7 +108,11 @@ public class MyBot : IChessBot
             int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
 
-            if (eval >= beta) return beta; // *snip* :D
+            if (eval >= beta)
+            {
+                killerMoves[board.PlyCount].Add(move);
+                return beta; // *snip* :D
+            }
             if (eval > alpha)
             {
                 alpha = eval;
@@ -146,11 +158,13 @@ public class MyBot : IChessBot
             {
                 // 1. Priority Move
                 _ when move == putThisFirst => 0,
-                // 2. Promotion
-                { IsPromotion: true } => 1,
-                // 3. Captures
+                // 2. Killer Moves
+                _ when killerMoves[board.PlyCount].Contains(move) => 1,
+                // 3. Promotion
+                { IsPromotion: true } => 2,
+                // 4. Captures
                 { IsCapture: true } => 1000 - 10 * (int)move.CapturePieceType + (int)move.MovePieceType,
-                // 4. Prioritize moves with deep beta cutoffs; TODO
+                // 5. General Case
                 _ => 100_000_000
             };
         }
