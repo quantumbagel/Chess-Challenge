@@ -67,7 +67,7 @@ public class MyBot : IChessBot
             // Use really large values to guarantee initial sets
             Search(searchDepth, 0, -9999999, 9999999);
 
-            Console.WriteLine($"completed depth: {searchDepth}");
+            Console.WriteLine($"completed depth: {searchDepth} Move: {bestMovesByDepth[0]}");
 
             // Checkmate has been found; Hardcoded checkmate score to save tokens
             if (Math.Abs(bestEval) > 99000) break;
@@ -78,10 +78,10 @@ public class MyBot : IChessBot
     {
         // Cancel the search if we are out of time.
         isSearchCancelled = 30 * timer.MillisecondsElapsedThisTurn > timer.MillisecondsRemaining;
-        if (isSearchCancelled || board.IsRepeatedPosition()) return 0;
+        if (isSearchCancelled || board.IsRepeatedPosition() || board.IsInsufficientMaterial()) return 0;
 
         // Check for Checkmate before we do anything else.
-        if (board.IsInCheckmate() || board.IsInsufficientMaterial()) return -100000 + plyFromRoot;
+        if (board.IsInCheckmate()) return -100000 + plyFromRoot;
 
 
         // Once we reach target depth, search only captures to make the evaluation more accurate
@@ -104,9 +104,12 @@ public class MyBot : IChessBot
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            // extend if we put the king in check
             int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
+
+            // Second Cancel Check just to be sure we aren't accidentally overriding
+            // the previous best move with a cancelled search
+            if (isSearchCancelled) return 0;
 
             if (eval >= beta)
             {
