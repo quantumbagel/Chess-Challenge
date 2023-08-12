@@ -4,36 +4,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 
-public class MyBot : IChessBot
+public class AlphaBetaV4_4 : IChessBot
 {
-
-    // Can save 4 tokens by removing this line and replacing `TABLE_SIZE` with a literal
-    private const ulong TABLE_SIZE = 1 << 23;
-
-    /// <summary>
-    /// Transposition Table for caching previously computed positions during search.
-    /// 
-    /// To insert an entry:
-    /// <code>TranspositionTable[zobrist % TABLE_SIZE] = (zobrist, depth, evaluation, nodeType, move);</code>
-    /// 
-    /// To retrieve an entry:
-    /// <code>var (zobrist, depth, evaluation, nodeType, move) = TranspositionTable[zobrist % TABLE_SIZE];</code>
-    /// 
-    /// Node types:
-    /// <list type="bullet">
-    ///     <item>1: PV node, an exact evaluation</item>
-    ///     <item>2: Beta cutoff node, a lower bound</item>
-    ///     <item>3: All node, an upper bound</item>
-    /// </list>
-    /// </summary>
-    private readonly
-    (
-        ulong,  // Zobrist
-        int,    // Depth
-        int,    // Evaluation
-        int,    // Node Type
-        Move    // Best move
-    )[] transpositionTable = new (ulong, int, int, int, Move)[TABLE_SIZE];
 
     // Piece-Square Tables compressed int 
     static readonly decimal[] pieceSquareTablesCompressed = new decimal[]
@@ -63,8 +35,7 @@ public class MyBot : IChessBot
     private Timer timer;
     private Board board;
 
-    Move bestMove;
-    //Move[] bestMovesByDepth;
+    Move[] bestMovesByDepth;
     HashSet<Move>[] killerMoves;
     int bestEval;
     bool isSearchCancelled;
@@ -73,8 +44,7 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         StartSearch(board, timer);
-        //return bestMovesByDepth[0];
-        return bestMove;
+        return bestMovesByDepth[0];
     }
 
     void StartSearch(Board _board, Timer _timer)
@@ -82,8 +52,7 @@ public class MyBot : IChessBot
         board = _board;
         timer = _timer;
 
-        bestMove = default;
-        //bestMovesByDepth = new Move[256];
+        bestMovesByDepth = new Move[256];
         bestEval = 0;
         isSearchCancelled = false;
 
@@ -98,8 +67,7 @@ public class MyBot : IChessBot
             // Use really large values to guarantee initial sets
             Search(searchDepth, 0, -9999999, 9999999);
 
-            //Console.WriteLine($"completed depth: {searchDepth} Move: {bestMovesByDepth[0]}");
-            Console.WriteLine($"completed depth: {searchDepth} Move: {bestMove}");
+            Console.WriteLine($"completed depth: {searchDepth}");
 
             // Checkmate has been found; Hardcoded checkmate score to save tokens
             if (Math.Abs(bestEval) > 99000) break;
@@ -110,18 +78,18 @@ public class MyBot : IChessBot
     {
         // Cancel the search if we are out of time.
         isSearchCancelled = 30 * timer.MillisecondsElapsedThisTurn > timer.MillisecondsRemaining;
-        if (isSearchCancelled || board.IsRepeatedPosition() || board.IsInsufficientMaterial()) return 0;
+        if (isSearchCancelled || board.IsRepeatedPosition()) return 0;
 
         // Check for Checkmate before we do anything else.
-        if (board.IsInCheckmate()) return -100000 + plyFromRoot;
+        if (board.IsInCheckmate() || board.IsInsufficientMaterial()) return -100000 + plyFromRoot;
 
 
         // Once we reach target depth, search only captures to make the evaluation more accurate
         // Also if we're in check, add to depth so we make sure we don't screw ourselves
-        if (depth == 0) 
+        if (depth == 0)
         {
             if (board.IsInCheck()) depth++;
-            else return QuiescenceSearch(alpha, beta); 
+            else return QuiescenceSearch(alpha, beta);
         }
 
         Span<Move> moves = stackalloc Move[256];
@@ -130,59 +98,29 @@ public class MyBot : IChessBot
         // Stalemate Check
         if (moves.Length == 0) return 0;
 
-        // Transposition table lookup
-        // TODO: Should we try to probe before generating moves?
-        ulong zobrist = board.ZobristKey;
-        ulong TTidx = zobrist % TABLE_SIZE;
-
-        var (TTzobrist, TTdepth, TTeval, TTtype, TTm) = transpositionTable[TTidx];
-
-        // The TT entry is from a different position, so no best move is available
-        if (TTzobrist != zobrist)
-            TTm = default;
-        else if (plyFromRoot != 0 && TTdepth >= depth && (TTtype is 1 || TTtype is 2 && TTeval >= beta || TTtype is 3 && TTeval <= alpha))
-            return TTeval;
-
-        // Null Move Pruning: check if we beat beta even without moving
-        if (depth > 2 && plyFromRoot != 0 && board.TrySkipTurn())
-        {
-            int eval = -Search(depth - 3, plyFromRoot + 3, -beta, -beta + 1);
-            board.UndoSkipTurn();
-            if (eval >= beta) return beta;
-        }
-
-
         // Order the moves, making sure to put the best move from the previous iteration first
-        Sort(ref moves, TTm);
-
-        var oldAlpha = alpha;
+        Sort(ref moves, bestMovesByDepth[plyFromRoot]);
 
         foreach (Move move in moves)
         {
             board.MakeMove(move);
+            // extend if we put the king in check
             int eval = -Search(depth - 1, plyFromRoot + 1, -beta, -alpha);
             board.UndoMove(move);
-
-            // Second Cancel Check just to be sure we aren't accidentally overriding
-            // the previous best move with a cancelled search
-            if (isSearchCancelled) return 0;
 
             if (eval >= beta)
             {
                 killerMoves[board.PlyCount].Add(move);
-                transpositionTable[TTidx] = (zobrist, depth, eval, 2, move);
                 return beta; // *snip* :D
             }
             if (eval > alpha)
             {
                 alpha = eval;
-                TTm = move;
-                if (plyFromRoot == 0) bestMove = TTm;
+                bestMovesByDepth[plyFromRoot] = move;
                 bestEval = plyFromRoot == 0 ? eval : bestEval;
             }
         }
 
-        transpositionTable[TTidx] = (zobrist, depth, alpha, alpha == oldAlpha ? 3 : 1, TTm);
         return alpha;
     }
 
@@ -430,7 +368,7 @@ public class MyBot : IChessBot
                 {
                     int pieceIndex = BitboardHelper.ClearAndGetIndexOfLSB(ref bitboard);
                     int tableIndex = piece * 64                                // table start index
-                        + ( pieceIndex                                         // square index in the table
+                        + (pieceIndex                                         // square index in the table
                         ^ (sign is -1 ? 56 : 0));                              // flip board for white pieces
 
                     mgScore += sign * pieceSquareTables[tableIndex];
