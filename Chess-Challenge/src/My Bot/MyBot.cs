@@ -415,12 +415,14 @@ public class MyBot : IChessBot
     // The position is assumed to be 'quiet', i.e no captures are available that could drastically affect the evaluation.
     // The score that's returned is given from the perspective of whoever's turn it is to move.
     // So a positive score means the player who's turn it is to move has an advantage, while a negative score indicates a disadvantage.
+
+    static readonly int[] signs = new int[] { 1, -1 };
     public int Evaluate()
     {
         int mgScore = 0, egScore = 0, material = 0, phase = 0;
 
         // Loop through white and black pieces (1 for white, -1 for black)
-        foreach (var sign in new[] { 1, -1 })
+        foreach (var sign in signs)
         {
             Square enemyKingSquare = board.GetKingSquare(sign is -1);
             for (var piece = 0; piece < 6; piece++)
