@@ -126,9 +126,9 @@ public class MyBot : IChessBot
 
     int Search(int depth, int plyFromRoot, int alpha, int beta)
     {
-        // Cancel the search if we are out of time.
+        // Check if we need to cancel the search if we are out of time.
         isSearchCancelled = 30 * timer.MillisecondsElapsedThisTurn > timer.MillisecondsRemaining;
-        if (isSearchCancelled || board.IsRepeatedPosition() || board.IsInsufficientMaterial()) return 0;
+        if (board.IsRepeatedPosition() || board.IsInsufficientMaterial()) return 0;
 
         // Check for Checkmate before we do anything else.
         if (board.IsInCheckmate()) return -100000 + plyFromRoot;
@@ -434,6 +434,7 @@ public class MyBot : IChessBot
     // The score that's returned is given from the perspective of whoever's turn it is to move.
     // So a positive score means the player who's turn it is to move has an advantage, while a negative score indicates a disadvantage.
 
+    // might as well make this a static variable so we don't have to keep recreating it.
     static readonly int[] signs = new int[] { 1, -1 };
     public int Evaluate()
     {
